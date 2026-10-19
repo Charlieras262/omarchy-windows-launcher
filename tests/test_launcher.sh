@@ -54,6 +54,11 @@ case "\$1" in
       {address:"0xpopup", pid:\$pid, title:"FreeRDP: dialog",      workspace:{id:1}, size:[300,200], at:[10,10], floating:true, fullscreen:0},
       {address:"0xother", pid:1,     title:"Terminal",              workspace:{id:1}, size:[1,1], at:[0,0], floating:false, fullscreen:0}]' ;;
   activeworkspace) echo '{"id":1}' ;;
+  activewindow)
+    pid=\$(cat "$T/run/rdp-started" 2>/dev/null); pid=\${pid:-0}
+    n=\$(cat "$T/aw" 2>/dev/null || echo 0); n=\$((n+1)); echo \$n > "$T/aw"
+    # 1-4 other window, 5-10 the Windows window, 11-16 other, then Windows again
+    if (( n <= 4 )) || (( n >= 11 && n <= 16 )); then echo '{"pid":1}'; else jq -n --argjson p "\$pid" '{pid:\$p}'; fi ;;
   dispatch) echo "dsp \$2" >> "$T/calls" ;;
 esac
 FAKE
@@ -70,7 +75,7 @@ FAKE
   export PATH="$T/realbin:$ORIG_PATH"
   export OWL_RUNTIME_DIR="$T/run" OWL_SHELL_CMD="$T/bin/omarchy-shell" OWL_VM_CMD="$T/bin/omarchy-windows-vm" \
          OWL_BAR_CMD="$T/bin/bar" OWL_NOTIFY_CMD="$T/bin/notify" OWL_REAL_PATH="$T/realbin:$PATH" \
-         OWL_HYPR_CONFIG="$T/hypr.lua" OWL_TOGGLES_DIR="$T/toggles" OWL_HYPRCTL="$T/bin/hyprctl" OWL_WATCH=0.1 OWL_LAUNCH_CMD_FILE="$T/none" OWL_TICK=0.2 OWL_LSBLK_JSON="$ROOT/tests/fixtures/this-machine.json" OWL_PROTECTED_DISKS=""
+         OWL_HYPR_CONFIG="$T/hypr.lua" OWL_TOGGLES_DIR="$T/toggles" OWL_HYPRCTL="$T/bin/hyprctl" OWL_BAR_POLL=0.05 OWL_WATCH=0.1 OWL_LAUNCH_CMD_FILE="$T/none" OWL_TICK=0.2 OWL_LSBLK_JSON="$ROOT/tests/fixtures/this-machine.json" OWL_PROTECTED_DISKS=""
   unset FAKE_NO_SHELL FAKE_VM_FAIL FAKE_STOP_FAIL FAKE_VM_HOLD TEST_ANSWER
 }
 teardown() { rm -rf "$T"; }
@@ -115,7 +120,7 @@ export FAKE_VM_HOLD=2.5 FAKE_STICK_AFTER=2 TEST_ANSWER='{"action":"start","close
 assert_eq "exits 0" "0" "$(run)"
 assert_eq "RDP is told about all the monitors so the remote desktop is one canvas" "yes" "$(has '^rdp .*/multimon:force /f' && echo yes || echo no)"
 assert_eq "the bar flag is set while the session runs and cleared after (bar visible again)" "no" "$([[ -f $T/toggles/bar-off ]] && echo yes || echo no)"
-assert_eq "bar is hidden then restored, in that order" "bar on|bar off" "$(calls | grep '^bar ' | paste -sd'|')"
+assert_eq "bar is hidden first and shown last" "bar on|bar off" "$(calls | grep '^bar ' | sed -n '1p;$p' | paste -sd'|')"
 assert_eq "bar flag is cleared in the state" "false" "$(jq -r .hidBar "$T/run/state.json")"
 teardown
 
@@ -168,6 +173,16 @@ setup
 rm -f "$T/hypr.lua"
 export TEST_ANSWER='{"action":"cancel"}'
 assert_eq "without a user rule the focus is left alone" "no" "$( run >/dev/null; has 'hl.dsp.focus' && echo yes || echo no)"
+teardown
+
+echo "bar follows the focus"
+setup
+export FAKE_VM_HOLD=4 FAKE_STICK_AFTER=2 TEST_ANSWER='{"action":"start","closeOnExit":true,"allMonitors":true,"disks":[]}'
+assert_eq "exits 0" "0" "$(run)"
+seq=$(calls | grep '^bar ' | paste -sd'|')
+assert_eq "hidden on focus, shown when focus leaves, hidden again when it returns, shown at the end" \
+  "bar on|bar off|bar on|bar off" "$(echo "$seq" | cut -d'|' -f1-4)"
+assert_eq "the bar is visible when the session is over" "no" "$([[ -f $T/toggles/bar-off ]] && echo yes || echo no)"
 teardown
 
 echo "bar already hidden"

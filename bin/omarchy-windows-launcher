@@ -87,20 +87,42 @@ ask_options() {
 OWL_TOGGLES_DIR=${OWL_TOGGLES_DIR:-$HOME/.local/state/omarchy/toggles}
 bar_is_hidden() { [[ -f $OWL_TOGGLES_DIR/bar-off ]]; }
 
-# Hide the bar for the session, but only record it as ours if it was visible, so a bar
-# the user had already hidden stays hidden afterwards (FR-019).
+# The bar follows the focus (all-monitors mode, once the Windows window is in place):
+# hidden while a window of the RDP client has focus, shown again as soon as something else
+# does, and so on. `bar_managed` is decided once: a bar the user had already hidden is never
+# touched (FR-019). `hid_bar` means "hidden by us right now", which is what restore undoes.
+bar_managed=""
+
 hide_bar() {
-  bar_is_hidden && return 0
+  [[ $hid_bar == true ]] && return 0
   hid_bar=true
   owl_state_patch '.hidBar = true'
   "$OWL_BAR_CMD" on >/dev/null 2>&1
 }
 
-restore_bar() {
+show_bar() {
   [[ $hid_bar == true ]] || return 0
   "$OWL_BAR_CMD" off >/dev/null 2>&1
   hid_bar=false
   owl_state_patch '.hidBar = false'
+}
+
+restore_bar() { show_bar; }
+
+# True when the focused window belongs to the RDP client (the main window or its popups).
+windows_focused() {
+  local pid active
+  pid=$(cat "$OWL_RUNTIME_DIR/rdp-started" 2>/dev/null) || return 1
+  active=$("$OWL_HYPRCTL" activewindow -j 2>/dev/null | jq -r '.pid // empty')
+  [[ -n $pid && $active == "$pid" ]]
+}
+
+sync_bar() {
+  if [[ -z $bar_managed ]]; then
+    if bar_is_hidden; then bar_managed=false; else bar_managed=true; fi
+  fi
+  [[ $bar_managed == true ]] || return 0
+  if windows_focused; then hide_bar; else show_bar; fi
 }
 
 # ----------------------------------------------------------------- RDP shim
@@ -345,16 +367,14 @@ main() {
     owl_state_stage running "Windows is ready"
     connecting=true
   }
-  # The bar goes away only once Windows is up and its window is in place, never while
-  # it is still booting (the user keeps the bar, clock and tray until then).
-  local bar_done=false
+  # The bar stays until Windows is up and its window is in place (never while booting);
+  # from then on it follows the focus.
   while kill -0 "$vm_pid" 2>/dev/null; do
     mark_running
-    if [[ $all_monitors == true && $bar_done == false && -e $OWL_RUNTIME_DIR/window-settled ]]; then
-      hide_bar
-      bar_done=true
+    if [[ $all_monitors == true && -e $OWL_RUNTIME_DIR/window-settled ]]; then
+      sync_bar
     fi
-    sleep 0.3
+    sleep "${OWL_BAR_POLL:-0.3}"
   done
   wait "$vm_pid"
   local rc=$?

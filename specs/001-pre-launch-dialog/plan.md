@@ -167,6 +167,12 @@ needing Docker access from the UI:
 - **Last resort**: TCP probe of `3389` after the container reports running.
 Progress never exposes credentials (NFR-003).
 
+### D11 — Bar follows focus (FR-028)
+After the window settles, the main loop polls `hyprctl activewindow -j` (0.3 s) and compares the focused window's PID with the RDP
+client's PID (so its popups count): focused → `omarchy toggle bar on` (hidden), otherwise → `omarchy toggle bar off`. It acts only on
+changes. Whether the bar is managed at all is decided once, at the first tick (a bar the user already hid is never touched); restore on
+every exit path shows it again. A polling loop was chosen over the Hyprland event socket to stay dependency-free and testable.
+
 ### D10 — Overlays on the Windows workspace (FR-027)
 The dialog and progress windows are layer-shell surfaces: they have no workspace, they appear on whichever monitor is focused. To put
 them where Windows will open, the launcher reads the workspace from the user's own window rule for the title (`hyprland.lua`, never
