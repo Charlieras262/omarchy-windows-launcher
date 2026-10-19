@@ -142,6 +142,50 @@ SHIM
   printf '%s' "$dir"
 }
 
+# ----------------------------------------------------------------- authorization
+
+# "pid comm" of every descendant of a process.
+descendants() {
+  ps -eo pid=,ppid=,comm= 2>/dev/null | awk -v root="$1" '
+    { parent[$1] = $2; name[$1] = $3 }
+    END {
+      for (p in parent) {
+        q = p
+        while (q in parent && q != 1) {
+          if (parent[q] == root) { print p, name[p]; break }
+          q = parent[q]
+        }
+      }
+    }'
+}
+
+# Block until the privilege prompt (if any) is over. The packaged command elevates with
+# pkexec, which sits waiting for the polkit agent and only starts its child once the
+# user has authorized; so: a pkexec without children = still asking. If no pkexec shows
+# up within a short grace period (sudoless Docker) there is nothing to wait for. The
+# progress window must not appear before this returns: both are shell overlays and the
+# progress one would cover the password prompt and take the keyboard from it.
+wait_for_authorization() {
+  local root="$1" waited=0 saw=false pk announced=false
+  while kill -0 "$root" 2>/dev/null; do
+    pk=$(descendants "$root" | awk '$2 == "pkexec" { print $1; exit }')
+    if [[ -n $pk ]]; then
+      saw=true
+      pgrep -P "$pk" >/dev/null 2>&1 && return 0
+      if [[ $announced == false ]]; then
+        owl_state_stage authorizing "Waiting for authorization…"
+        announced=true
+      fi
+    elif [[ $saw == true ]]; then
+      return 0
+    else
+      waited=$((waited + 1))
+      ((waited >= ${OWL_AUTH_GRACE_TICKS:-15})) && return 0
+    fi
+    sleep 0.1
+  done
+}
+
 # ----------------------------------------------------------------- window placement
 
 dsp() { "$OWL_HYPRCTL" dispatch "$1" >/dev/null 2>&1; }
@@ -330,7 +374,6 @@ main() {
   owl_state_patch '.keepAlive = ($k == "false") | .allMonitors = ($m == "true")' \
     --arg k "$close_on_exit" --arg m "$all_monitors"
 
-  show_progress
   owl_state_stage starting "Starting the VM…"
 
   local extra="" shim
@@ -356,6 +399,10 @@ main() {
   vm_pid=$!
   start_watcher "$all_monitors"
 
+  # Progress window only after the authorization prompt is over.
+  wait_for_authorization "$vm_pid"
+  show_progress
+  owl_state_stage starting "Starting the VM…"
   owl_state_stage booting "Waiting for Windows to boot…"
   start_ticker
 
@@ -397,10 +444,14 @@ main() {
   restore_bar
 
   if [[ $close_on_exit == true ]]; then
-    show_progress
     owl_state_stage closing "Closing Windows…"
+    "$OWL_VM_CMD" stop >>"$out" 2>&1 &
+    local stop_pid=$!
+    # Same rule as at launch: the shutdown window waits for the authorization prompt.
+    wait_for_authorization "$stop_pid"
+    show_progress
     owl_state_stage stopping "Shutting down the VM…"
-    if "$OWL_VM_CMD" stop >>"$out" 2>&1; then
+    if wait "$stop_pid"; then
       owl_state_stage stopped "Windows stopped"
     else
       owl_state_stage failed "Could not stop the VM" "Stop it with: omarchy windows vm stop"

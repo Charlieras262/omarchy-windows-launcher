@@ -22,16 +22,28 @@ FAKE
   cat >"$T/bin/omarchy-windows-vm" <<FAKE
 #!/bin/bash
 echo "vm \$*" >> "$T/calls"
+elevate() { [[ -n \${FAKE_AUTH_DELAY:-} ]] && { pkexec || return 1; }; return 0; }
 case "\$1" in
   launch)
     echo "Starting Windows VM..."
+    elevate || { echo "Failed to start Windows VM!"; exit 1; }
     [[ -n \${FAKE_VM_FAIL:-} ]] && { echo "Failed to start Windows VM!"; exit 1; }
     sleep 0.5
     xfreerdp3 /u:x /v:127.0.0.1
     sleep "\${FAKE_VM_HOLD:-0}"
     exit 0 ;;
-  stop) [[ -n \${FAKE_STOP_FAIL:-} ]] && exit 1; echo stopped; exit 0 ;;
+  stop) elevate || exit 1; [[ -n \${FAKE_STOP_FAIL:-} ]] && exit 1; echo stopped; exit 0 ;;
 esac
+FAKE
+  mkfifo "$T/fifo"
+  # Like the real pkexec: no child process while it waits for the polkit agent, a child
+  # once the user has authorized (the work it runs). Name must be exactly "pkexec".
+  cat >"$T/realbin/pkexec" <<FAKE
+#!/bin/bash
+read -t "\${FAKE_AUTH_DELAY:-0}" <> "$T/fifo"
+[[ -n \${FAKE_AUTH_DECLINE:-} ]] && exit 126
+echo "auth granted" >> "$T/calls"
+sleep 0.5
 FAKE
   cat >"$T/realbin/xfreerdp3" <<FAKE
 #!/bin/bash
@@ -75,8 +87,8 @@ FAKE
   export PATH="$T/realbin:$ORIG_PATH"
   export OWL_RUNTIME_DIR="$T/run" OWL_SHELL_CMD="$T/bin/omarchy-shell" OWL_VM_CMD="$T/bin/omarchy-windows-vm" \
          OWL_BAR_CMD="$T/bin/bar" OWL_NOTIFY_CMD="$T/bin/notify" OWL_REAL_PATH="$T/realbin:$PATH" \
-         OWL_HYPR_CONFIG="$T/hypr.lua" OWL_TOGGLES_DIR="$T/toggles" OWL_HYPRCTL="$T/bin/hyprctl" OWL_BAR_POLL=0.05 OWL_WATCH=0.1 OWL_LAUNCH_CMD_FILE="$T/none" OWL_TICK=0.2 OWL_LSBLK_JSON="$ROOT/tests/fixtures/this-machine.json" OWL_PROTECTED_DISKS=""
-  unset FAKE_NO_SHELL FAKE_VM_FAIL FAKE_STOP_FAIL FAKE_VM_HOLD TEST_ANSWER
+         OWL_HYPR_CONFIG="$T/hypr.lua" OWL_TOGGLES_DIR="$T/toggles" OWL_HYPRCTL="$T/bin/hyprctl" OWL_AUTH_GRACE_TICKS=5 OWL_BAR_POLL=0.05 OWL_WATCH=0.1 OWL_LAUNCH_CMD_FILE="$T/none" OWL_TICK=0.2 OWL_LSBLK_JSON="$ROOT/tests/fixtures/this-machine.json" OWL_PROTECTED_DISKS=""
+  unset FAKE_AUTH_DELAY FAKE_AUTH_DECLINE FAKE_NO_SHELL FAKE_VM_FAIL FAKE_STOP_FAIL FAKE_VM_HOLD TEST_ANSWER
 }
 teardown() { rm -rf "$T"; }
 calls() { cat "$T/calls"; }
@@ -173,6 +185,32 @@ setup
 rm -f "$T/hypr.lua"
 export TEST_ANSWER='{"action":"cancel"}'
 assert_eq "without a user rule the focus is left alone" "no" "$( run >/dev/null; has 'hl.dsp.focus' && echo yes || echo no)"
+teardown
+
+echo "progress windows wait for the authorization prompt"
+setup
+export FAKE_AUTH_DELAY=1.2 TEST_ANSWER='{"action":"start","closeOnExit":true,"allMonitors":false,"disks":[]}'
+assert_eq "exits 0" "0" "$(run)"
+nth() { calls | grep -n -E -- "$1" | sed -n "${2}p" | cut -d: -f1; }
+assert_eq "launch: the progress window opens after the first authorization" "yes" \
+  "$( (( $(nth 'view":"progress' 1) > $(nth 'auth granted' 1) )) && echo yes || echo no)"
+assert_eq "shutdown: the progress window opens after the second authorization" "yes" \
+  "$( (( $(nth 'view":"progress' 2) > $(nth 'auth granted' 2) )) && echo yes || echo no)"
+assert_eq "the dialog (before any prompt) still opens first" "yes" \
+  "$( (( $(nth 'view":"dialog' 1) < $(nth 'auth granted' 1) )) && echo yes || echo no)"
+teardown
+
+setup
+export TEST_ANSWER='{"action":"start","closeOnExit":true,"allMonitors":false,"disks":[]}'
+assert_eq "without a privilege prompt (sudoless Docker) it does not hang waiting" "0" "$(run)"
+assert_eq "...and still shows both progress windows" "2" "$(calls | grep -c 'view":"progress')"
+teardown
+
+setup
+export FAKE_AUTH_DELAY=0.5 FAKE_AUTH_DECLINE=1 TEST_ANSWER='{"action":"start","closeOnExit":true,"allMonitors":false,"disks":[]}'
+assert_eq "declining the prompt fails the launch" "1" "$(run)"
+assert_eq "...and the failure is shown in the progress window" "failed" "$(jq -r .stage "$T/run/state.json")"
+assert_eq "...which opens only after the prompt was answered" "1" "$(calls | grep -c 'view":"progress')"
 teardown
 
 echo "bar follows the focus"

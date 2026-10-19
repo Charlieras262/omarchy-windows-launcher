@@ -192,6 +192,9 @@ before doing anything else.
   failed or aborted launch.
 - **FR-011** A progress window MUST be shown from **Start** until the Windows window
   appears, reporting the stages of US5 and an overall progress indicator.
+- **FR-029** The progress and shutdown windows MUST open only after the privilege (password) prompt is over, never
+  before or on top of it, so they cannot cover it or take the keyboard from it. With no prompt (for example sudoless
+  Docker) they open immediately. A declined prompt is shown as a failure in the progress window.
 - **FR-012** A shutdown window MUST be shown when the VM is being stopped by a closed
   window, reporting stopping and finished states.
 - **FR-013** Both windows MUST use the shell's existing theme and components and MUST NOT

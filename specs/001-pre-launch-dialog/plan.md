@@ -167,6 +167,13 @@ needing Docker access from the UI:
 - **Last resort**: TCP probe of `3389` after the container reports running.
 Progress never exposes credentials (NFR-003).
 
+### D12 — Progress windows wait for the authorization prompt (FR-029)
+The packaged command elevates with `pkexec`, which waits for the polkit agent and only starts its child once the user has authorized.
+The orchestrator starts the command in the background and watches its process tree: a `pkexec` descendant without children means the
+prompt is still open (state `authorizing`, no window yet); once it has a child, or has exited, the prompt is over and the progress
+window is summoned. If no `pkexec` appears within a short grace period (sudoless Docker) it proceeds at once. Same rule for the stop at
+shutdown. The windows must not overlap the prompt because both are shell overlays and ours takes exclusive keyboard focus.
+
 ### D11 — Bar follows focus (FR-028)
 After the window settles, the main loop polls `hyprctl activewindow -j` (0.3 s) and compares the focused window's PID with the RDP
 client's PID (so its popups count): focused → `omarchy toggle bar on` (hidden), otherwise → `omarchy toggle bar off`. It acts only on

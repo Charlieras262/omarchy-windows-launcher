@@ -68,6 +68,7 @@ clarification in `spec.md` §7 is resolved (done as of this revision).
 
 - [x] **T30** Orchestrator: build RDP monitor flags from `hyprctl monitors -j` per S2; single-monitor path unchanged. — FR-004
 - [x] **T33** Float, resize and move the main window across all monitors (`lib/layout.sh`, tested against fixtures and a fake `hyprctl`). — FR-026
+- [x] **T37** Progress and shutdown windows open only after the authorization prompt (pkexec process-tree detection). — FR-029
 - [x] **T36** Bar follows window focus (hidden while the RDP client has focus, shown otherwise). — FR-028
 - [x] **T35** Hide the bar only after the window settled; focus the Windows workspace before the dialog and restore it on cancel. — FR-019, FR-027
 - [x] **T34** Watcher keeps the RDP client's popups on the main window's workspace; user's title rule untouched. — FR-024, FR-025
