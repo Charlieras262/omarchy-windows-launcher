@@ -9,7 +9,8 @@ import qs.Ui
 //
 //   dialog    options before the VM starts (spec US1). Writes the choice as
 //             JSON to payload.answersFile; the orchestrator waits on that file.
-//   progress  launch / shutdown progress (spec US5). Pure renderer of the
+//   progress  launch / shutdown progress (spec US5): a title and a bar, nothing else;
+//             a failure also shows its reason and a Close button. Pure renderer of the
 //             state file the orchestrator keeps up to date; no logic here.
 //
 // Summon payload (JSON):
@@ -173,7 +174,7 @@ Item {
     BorderSurface {
       id: card
       width: root.cardWidth
-      height: Math.min(content.implicitHeight + card.contentTopInset + card.contentBottomInset + root.contentMargin * 2,
+      height: Math.min(content.implicitHeight + card.contentTopInset + card.contentBottomInset,
                        panel.height - Style.gapsOut * 2)
       radius: root.cornerRadius
       anchors.centerIn: parent
@@ -229,7 +230,7 @@ Item {
           Toggle {
             visible: root.view === "dialog"
             width: parent.width
-            label: "Close the VM when the window closes"
+            label: "Close VM with the window"
             description: "Stops the Windows container when you close the window."
             checked: root.closeOnExit
             fontFamily: root.fontFamily
@@ -321,18 +322,6 @@ Item {
           }
 
           Text {
-            visible: root.view === "progress"
-            width: parent.width
-            textFormat: Text.PlainText
-            text: root.vm.message || ""
-            color: root.foreground
-            opacity: 0.8
-            font.family: root.fontFamily
-            font.pixelSize: Style.font.body
-            wrapMode: Text.WordWrap
-          }
-
-          Text {
             visible: root.view === "progress" && root.failed && (root.vm.error || "") !== ""
             width: parent.width
             textFormat: Text.PlainText
@@ -343,8 +332,9 @@ Item {
             wrapMode: Text.WordWrap
           }
 
+          // Only a failure keeps the window open, so only then is there anything to close.
           Button {
-            visible: root.view === "progress" && root.terminal
+            visible: root.view === "progress" && root.failed
             anchors.right: parent.right
             text: "Close"
             fontFamily: root.fontFamily

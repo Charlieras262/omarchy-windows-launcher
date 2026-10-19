@@ -132,24 +132,27 @@ before doing anything else.
 
 **Acceptance scenarios**
 
-1. *Given* I pressed **Start**, *then* a window appears at once showing the current
-   stage and overall progress, with a text line describing what is happening.
-   Stages shown, in order: authorizing → preparing disks (only if any selected) →
-   starting the VM → waiting for Windows to boot → connecting the display.
+1. *Given* I pressed **Start** and any privilege prompt is over, *then* a window appears
+   showing only a title and an overall progress bar — no status text and no buttons while
+   things go well. The bar advances through the stages, in order: authorizing → preparing
+   disks (only if any selected) → starting the VM → waiting for Windows to boot →
+   connecting the display.
 2. *Given* the VM is booting, *then* the progress window keeps updating and does not
    look frozen for more than a few seconds at a time.
 3. *Given* the Windows window has appeared, *then* the progress window closes by
    itself.
-4. *Given* a stage fails or times out, *then* the progress window stays open, shows
-   which stage failed and why in plain language, offers **Close** (and **Retry** where
-   it makes sense), and leaves the VM in a known state (see FR-014).
-5. *Given* the Windows window closes with option 1 on, *then* a second window shows
-   "Shutting down Windows…", then "Windows stopped" (including that attached disks were
-   returned), and dismisses itself after a few seconds.
+4. *Given* a stage fails or times out, *then* the progress window stays open, changes its
+   title to say what could not be done, shows why in plain language, offers **Close** (and
+   **Retry** where it makes sense), and leaves the VM in a known state (see FR-014). A failure
+   is the only case in which the window shows text and a button.
+5. *Given* the Windows window closes with option 1 on, *then* a second window, again only
+   a title ("Shutting down Windows") and a progress bar, appears after any privilege prompt,
+   fills up as the VM stops (and attached disks are returned), and dismisses itself a few
+   seconds after it is done, with no button to press.
 6. *Given* the Windows window closes with option 1 off, *then* a short notice (not a
    blocking window) says the VM is still running and how to stop it.
-7. *Given* the VM start requires an authorization prompt, *then* the progress window
-   says it is waiting for authorization instead of looking stuck.
+7. *Given* the VM start requires an authorization prompt, *then* the progress window does
+   not appear until the prompt is over (FR-029), so it never covers it.
 
 ## 3. Functional requirements
 
