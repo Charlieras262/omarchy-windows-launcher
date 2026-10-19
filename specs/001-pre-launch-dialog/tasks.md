@@ -1,5 +1,19 @@
 # Tasks: Pre-launch dialog and launch/close progress
 
+## Progress (kept current)
+
+**Done and unit-tested with fakes (no real VM touched):** state file + lock, disk eligibility, shell overlay
+plugin (loads in an isolated Quickshell, dialog writes answers, progress renders state), orchestrator for options
+1 and 2 (close-on-exit, multi-monitor flags, bar hide/restore, failure paths, single-session lock, user launch
+wrapper honored), install/uninstall.
+**Decision taken for the MVP (resolves S1 provisionally):** delegate bring-up to the packaged launcher via
+`omarchy-windows-vm launch --keep-alive` (or the user's own wrapper, recorded by `install.sh`), detect the RDP window
+with a PATH shim for `xfreerdp3`, and stop with `omarchy-windows-vm stop`. No private `__priv` internals are used and no
+root code exists yet.
+**Not yet validated live:** the full flow against the real VM and the real shell (needs `./install.sh` and a launch).
+**Not started:** external disks (Phase 5, needs the root helper), clean release and reconcile (D9), real boot-progress
+signal (S4, needs a running VM), S1/S2/S3/S4/S6 spikes against the real VM.
+
 Derived from `plan.md`. `[P]` = can run in parallel. Each task names the requirement it serves.
 Do not start Phase 1 until the Phase 0 spikes are recorded in `plan.md` and every
 clarification in `spec.md` §7 is resolved (done as of this revision).
@@ -14,7 +28,7 @@ clarification in `spec.md` §7 is resolved (done as of this revision).
       `/run/shm/monitor.sock`); verify read/write from Windows, clean release, and udiskie behaviour. Record the choice (D5). — FR-008..010
 - [ ] **S4** [P] Inspect `http://127.0.0.1:8006` for machine-readable boot status; if none, confirm the log-line
       fallback. Record the choice (D6). — FR-011, NFR-002
-- [ ] **S5** [P] Confirm the shell can summon a user overlay plugin with a JSON payload and read back a file result;
+- [x] **S5** [P] Confirm the shell can summon a user overlay plugin with a JSON payload and read back a file result;
       measure dialog latency. — NFR-001, FR-001
 
 - [ ] **S6** [P] Measure how long this Windows VM takes to shut down; test what happens to the container when the host
@@ -23,28 +37,28 @@ clarification in `spec.md` §7 is resolved (done as of this revision).
 
 ## Phase 1 — Foundations
 
-- [ ] **T01** Create `plugin/manifest.json` (id `charlieras262.windows-launcher`, kind `overlay`, `keepLoaded` as the
+- [x] **T01** Create `plugin/manifest.json` (id `charlieras262.windows-launcher`, kind `overlay`, `keepLoaded` as the
       spike dictates) and an empty view that loads. — FR-013
-- [ ] **T02** Define the `state.json` and `answers.json` schemas (documented in `plan.md` §4) and a bash library to
+- [x] **T02** Define the `state.json` and `answers.json` schemas (documented in `plan.md` §4) and a bash library to
       read/write them atomically. — FR-011
-- [ ] **T03** [P] Implement `list-disks` ("every whole disk minus the system set", D4) as a standalone function with unit tests using
+- [x] **T03** [P] Implement `list-disks` ("every whole disk minus the system set", D4) as a standalone function with unit tests using
       recorded `lsblk -J` fixtures: USB stick listed; a secondary data disk listed; NVMe root (including its LUKS/dm stack), `/boot`,
       `/home`, swap, `zram` and VM-storage disks excluded. — FR-005..007
-- [ ] **T04** [P] Implement the session lock and the `finalize` trap skeleton (release → stop/report). — FR-014, FR-015
-- [ ] **T05** `install.sh` / `uninstall.sh` (idempotent): copy plugin and wrapper, re-point the desktop entry, install the root
+- [x] **T04** [P] Implement the session lock and the `finalize` trap skeleton (release → stop/report). — FR-014, FR-015
+- [x] **T05** `install.sh` / `uninstall.sh` (idempotent): copy plugin and wrapper, re-point the desktop entry, install the root
       helper with `sudo`, and restore stock on uninstall. Test round trip leaves `git status`-style identical file trees. — FR-017, FR-018
 
 ## Phase 2 — Dialog (US1, US2) — MVP
 
-- [ ] **T10** `Dialog.qml`: two `Toggle`s with the specified defaults, Start/Cancel, `Esc`/`Enter`, full keyboard
+- [x] **T10** `Dialog.qml`: two `Toggle`s with the specified defaults, Start/Cancel, `Esc`/`Enter`, full keyboard
       navigation. — FR-001, FR-002
-- [ ] **T11** Orchestrator: summon dialog, wait for result, handle Cancel with zero side effects (no privilege prompt). — US1.2
-- [ ] **T12** Implement option 1 end to end: up → RDP → `down` or leave running; reconnect to a running VM. — FR-003, US2
+- [x] **T11** Orchestrator: summon dialog, wait for result, handle Cancel with zero side effects (no privilege prompt). — US1.2
+- [x] **T12** Implement option 1 end to end: up → RDP → `down` or leave running; reconnect to a running VM. — FR-003, US2
 - [ ] **T13** Test: scripted run covering US1.1–US1.4 and US2.1–US2.3 against the real VM. — US1, US2
 
 ## Phase 3 — Progress and shutdown windows (US5)
 
-- [ ] **T20** `Progress.qml` launch mode: stages, percent bar, message line, themed. — FR-011
+- [x] **T20** `Progress.qml` launch mode: stages, percent bar, message line, themed. — FR-011
 - [ ] **T21** Wire the booting signal chosen in S4; add the adaptive stage list (no "authorizing" with sudoless Docker). — FR-011, edge cases
 - [ ] **T22** Failure rendering: failed stage, plain reason, Close/Retry; authorization-declined path. — US5.4, FR-016
 - [ ] **T23** Shutdown mode and the "still running" toast. — FR-012, US5.5, US5.6
@@ -52,8 +66,8 @@ clarification in `spec.md` §7 is resolved (done as of this revision).
 
 ## Phase 4 — All monitors (US3)
 
-- [ ] **T30** Orchestrator: build RDP monitor flags from `hyprctl monitors -j` per S2; single-monitor path unchanged. — FR-004
-- [ ] **T32** Hide the bar with `omarchy toggle bar off` when option 2 is on; record whether it was already hidden; restore with
+- [x] **T30** Orchestrator: build RDP monitor flags from `hyprctl monitors -j` per S2; single-monitor path unchanged. — FR-004
+- [x] **T32** Hide the bar with `omarchy toggle bar off` when option 2 is on; record whether it was already hidden; restore with
       `omarchy toggle bar on` in `finalize` on every exit path only if we hid it. Test: normal close, failed launch after hiding,
       killed orchestrator, bar already hidden beforehand. — FR-019, US3.2, US3.3
 - [ ] **T31** Dialog: option 2 wired; test with 1 and N monitors. — US3

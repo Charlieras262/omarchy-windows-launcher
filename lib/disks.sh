@@ -88,3 +88,18 @@ owl_disk_summary() {
       ([.partitions[] | (.label // .name) + (if .fstype then " (" + .fstype + ")" else "" end)] | join(", "))
     ] | map(select(. != "")) | join(" · ")'
 }
+
+# Disks as MultiSelect options for the dialog: [{value, label, description}].
+# Stdin: the JSON array from owl_list_disks.
+owl_disk_options() {
+  jq -c '
+    def gb: (. / 1000000000 * 10 | floor) / 10;
+    [ .[] | {
+        value: .path,
+        label: (if .model != "" then .model else .name end),
+        description: ("\(.size | gb) GB · " + (if .removable then "removable" else "internal" end)
+                      + (if (.partitions | length) > 0
+                         then " · " + ([.partitions[] | (.label // .name)] | join(", "))
+                         else "" end))
+      } ]'
+}

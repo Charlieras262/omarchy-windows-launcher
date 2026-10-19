@@ -13,7 +13,8 @@ It is built only from what Omarchy already ships (the Omarchy shell, bash, `xfre
 
 ## Status
 
-**Specification phase.** No code yet. This project follows spec-driven development:
+**Early development.** Options 1 and 2 (close-on-exit, all monitors) and the progress windows are implemented and
+unit-tested; external disks are not built yet. This project follows spec-driven development:
 
 | Document | Purpose |
 |---|---|
@@ -25,3 +26,11 @@ It is built only from what Omarchy already ships (the Omarchy shell, bash, `xfre
 ## License
 
 GPL-3.0-or-later. See [LICENSE](LICENSE).
+
+## Try it
+
+```bash
+./install.sh      # user-level only: plugin, launcher, desktop entry (your existing launch command is kept)
+./uninstall.sh    # restores the previous desktop entry and removes everything
+bash tests/run.sh # unit tests (fakes only, never touches the real VM)
+```

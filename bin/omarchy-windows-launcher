@@ -1,0 +1,252 @@
+#!/bin/bash
+# Omarchy Windows launcher: options dialog, progress windows, and close handling
+# around the stock `omarchy-windows-vm`. See specs/001-pre-launch-dialog/.
+#
+# This first iteration (no external disks yet) delegates the privileged work to
+# the packaged command and wraps it:
+#   - `omarchy-windows-vm launch --keep-alive` brings the VM up and runs RDP;
+#   - a PATH shim for xfreerdp3 tells us when the window appears and can add
+#     multi-monitor flags;
+#   - after RDP exits we call `omarchy-windows-vm stop` if the user asked for it.
+# Nothing under /usr is modified (constitution II).
+
+set -u
+
+OWL_ROOT=$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/.." && pwd)
+PLUGIN_ID=charlieras262.windows-launcher
+
+# Injectable commands (the tests replace these).
+OWL_VM_CMD=${OWL_VM_CMD:-omarchy-windows-vm}
+OWL_SHELL_CMD=${OWL_SHELL_CMD:-omarchy-shell}
+OWL_NOTIFY_CMD=${OWL_NOTIFY_CMD:-omarchy-notification-send}
+OWL_BAR_CMD=${OWL_BAR_CMD:-omarchy-toggle-bar}
+OWL_RDP_EXTRA=${OWL_RDP_EXTRA:-/multimon:force /f}
+# install.sh records the command the user's own desktop entry used to launch the
+# VM (for example a personal wrapper that fixes permissions or audio) so we keep
+# honoring it instead of silently bypassing it.
+OWL_LAUNCH_CMD_FILE=${OWL_LAUNCH_CMD_FILE:-$HOME/.local/share/omarchy-windows-launcher/launch-cmd}
+
+# shellcheck source=lib/state.sh
+source "$OWL_ROOT/lib/state.sh"
+# shellcheck source=lib/disks.sh
+source "$OWL_ROOT/lib/disks.sh"
+
+log() { printf 'omarchy-windows-launcher: %s\n' "$*" >&2; }
+
+hid_bar=false
+vm_pid=""
+ticker_pid=""
+
+# ----------------------------------------------------------------- shell UI
+
+summon() { "$OWL_SHELL_CMD" shell summon "$PLUGIN_ID" "$1" >/dev/null 2>&1; }
+
+shell_available() { "$OWL_SHELL_CMD" shell ping >/dev/null 2>&1; }
+
+show_progress() {
+  summon "$(jq -cn --arg f "$(owl_state_file)" '{view: "progress", stateFile: $f}')"
+}
+
+# Ask the user. Prints the answers JSON on stdout; returns 1 if the dialog never answered.
+ask_options() {
+  local answers payload disks
+  answers=$(mktemp "$OWL_RUNTIME_DIR/answers.XXXXXX") || return 1
+  : >"$answers"
+  disks=$(owl_list_disks 2>/dev/null | owl_disk_options 2>/dev/null) || disks='[]'
+  [[ -n $disks ]] || disks='[]'
+  payload=$(jq -cn --arg a "$answers" --argjson d "$disks" '{view: "dialog", answersFile: $a, disks: $d}')
+  summon "$payload" || { rm -f "$answers"; return 1; }
+  local waited=0
+  while ((waited < 3000)); do # 5 minutes at 0.1s
+    if [[ -s $answers ]] && jq -e . "$answers" >/dev/null 2>&1; then
+      cat "$answers"
+      rm -f "$answers"
+      return 0
+    fi
+    sleep 0.1
+    waited=$((waited + 1))
+  done
+  rm -f "$answers"
+  return 1
+}
+
+# ----------------------------------------------------------------- bar
+
+hide_bar() {
+  hid_bar=true
+  owl_state_patch '.hidBar = true'
+  "$OWL_BAR_CMD" off >/dev/null 2>&1
+}
+
+restore_bar() {
+  [[ $hid_bar == true ]] || return 0
+  "$OWL_BAR_CMD" on >/dev/null 2>&1
+  hid_bar=false
+  owl_state_patch '.hidBar = false'
+}
+
+# ----------------------------------------------------------------- RDP shim
+
+# A directory placed first on PATH for the packaged launcher. Its xfreerdp3
+# records that the window is about to appear and (optionally) adds flags.
+make_shim() {
+  local dir="$OWL_RUNTIME_DIR/shim" real extra="$1"
+  real=$(PATH=${OWL_REAL_PATH:-$PATH} command -v xfreerdp3) || return 1
+  mkdir -p -- "$dir"
+  cat >"$dir/xfreerdp3" <<SHIM
+#!/bin/bash
+: > "$OWL_RUNTIME_DIR/rdp-started"
+exec "$real" "\$@" $extra
+SHIM
+  chmod 0755 "$dir/xfreerdp3"
+  printf '%s' "$dir"
+}
+
+# ----------------------------------------------------------------- progress ticker
+
+# While Windows boots we have no machine-readable signal yet (spike S4), so
+# creep the bar forward honestly and say we are waiting.
+start_ticker() {
+  (
+    local p=40
+    while sleep "${OWL_TICK:-2}"; do
+      ((p < 88)) && p=$((p + 1))
+      owl_state_progress "$p"
+    done
+  ) &
+  ticker_pid=$!
+}
+
+stop_ticker() {
+  [[ -n $ticker_pid ]] || return 0
+  kill "$ticker_pid" 2>/dev/null
+  wait "$ticker_pid" 2>/dev/null
+  ticker_pid=""
+}
+
+# ----------------------------------------------------------------- finalize
+
+finalize() {
+  trap - EXIT INT TERM HUP
+  stop_ticker
+  [[ -n $vm_pid ]] && kill "$vm_pid" 2>/dev/null
+  restore_bar
+  owl_lock_release
+}
+
+# ----------------------------------------------------------------- main
+
+main() {
+  if ! owl_lock_acquire; then
+    log "a launch is already in progress"
+    shell_available && show_progress
+    exit 0
+  fi
+  trap finalize EXIT
+  trap 'exit 130' INT TERM HUP
+
+  local -a launch_cmd
+  # No shell, no dialog: behave exactly like stock.
+  if ! shell_available; then
+    log "Omarchy shell not reachable; running the stock launcher"
+    owl_lock_release
+    if [[ -s $OWL_LAUNCH_CMD_FILE ]]; then
+      read -r -a launch_cmd <"$OWL_LAUNCH_CMD_FILE"
+      exec "${launch_cmd[@]}"
+    fi
+    exec "$OWL_VM_CMD" launch
+  fi
+
+  owl_state_init || exit 1
+
+  local answers action close_on_exit all_monitors
+  if ! answers=$(ask_options); then
+    log "no answer from the dialog"
+    exit 1
+  fi
+  action=$(jq -r '.action // "cancel"' <<<"$answers")
+  if [[ $action != start ]]; then
+    owl_state_stage cancelled "Cancelled"
+    exit 0
+  fi
+  close_on_exit=$(jq -r 'if .closeOnExit == false then "false" else "true" end' <<<"$answers")
+  all_monitors=$(jq -r 'if .allMonitors == true then "true" else "false" end' <<<"$answers")
+  owl_state_patch '.keepAlive = ($k == "false") | .allMonitors = ($m == "true")' \
+    --arg k "$close_on_exit" --arg m "$all_monitors"
+
+  show_progress
+  owl_state_stage starting "Starting the VM…"
+
+  local extra="" shim
+  if [[ $all_monitors == true ]]; then
+    extra=$OWL_RDP_EXTRA
+    hide_bar
+  fi
+  shim=$(make_shim "$extra") || {
+    owl_state_stage failed "Could not start" "xfreerdp3 was not found"
+    exit 1
+  }
+  rm -f -- "$OWL_RUNTIME_DIR/rdp-started"
+
+  # Bring the VM up and connect. --keep-alive: the stop decision is ours.
+  local out="$OWL_RUNTIME_DIR/vm.log"
+  : >"$out"
+  local -a launch_cmd
+  if [[ -s $OWL_LAUNCH_CMD_FILE ]]; then
+    read -r -a launch_cmd <"$OWL_LAUNCH_CMD_FILE"
+  else
+    launch_cmd=("$OWL_VM_CMD" launch)
+  fi
+  PATH="$shim:$PATH" "${launch_cmd[@]}" --keep-alive >"$out" 2>&1 &
+  vm_pid=$!
+
+  owl_state_stage booting "Waiting for Windows to boot…"
+  start_ticker
+
+  local connecting=false
+  mark_running() {
+    [[ $connecting == false && -e $OWL_RUNTIME_DIR/rdp-started ]] || return 0
+    stop_ticker
+    owl_state_stage connecting "Connecting the display…"
+    owl_state_stage running "Windows is ready"
+    connecting=true
+  }
+  while kill -0 "$vm_pid" 2>/dev/null; do
+    mark_running
+    sleep 0.3
+  done
+  wait "$vm_pid"
+  local rc=$?
+  vm_pid=""
+  stop_ticker
+  # The window may have opened and closed between two polls.
+  mark_running
+
+  if [[ $connecting == false ]]; then
+    # RDP never appeared: the launch itself failed.
+    local why
+    why=$(grep -v '^\s*$' "$out" | tail -n 1)
+    owl_state_stage failed "Windows could not start" "${why:-The launcher exited with status $rc}"
+    restore_bar
+    exit 1
+  fi
+
+  restore_bar
+
+  if [[ $close_on_exit == true ]]; then
+    show_progress
+    owl_state_stage closing "Closing Windows…"
+    owl_state_stage stopping "Shutting down the VM…"
+    if "$OWL_VM_CMD" stop >>"$out" 2>&1; then
+      owl_state_stage stopped "Windows stopped"
+    else
+      owl_state_stage failed "Could not stop the VM" "Stop it with: omarchy windows vm stop"
+      exit 1
+    fi
+  else
+    "$OWL_NOTIFY_CMD" "Windows VM" "Still running in the background. Stop it with: omarchy windows vm stop" >/dev/null 2>&1
+  fi
+  sleep "${OWL_LINGER:-0}"
+}
+
+main "$@"
