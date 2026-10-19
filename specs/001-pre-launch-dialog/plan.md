@@ -191,6 +191,9 @@ The user's own layer rule (`namespace ^omarchy-.*$`, `blur`, `ignore_alpha = 0.5
 its alpha is above 0.5. The `MultiSelect` popup is drawn inside the same fullscreen surface as the card, so the part of it that hung below the
 card was flat (nothing blurred there) and the Cancel/Start buttons showed through. Fix: while the list is open the card grows by the list's height
 so the whole popup stays over the card (frosted like the rest), the buttons fade out, and the popup keeps the theme's default (translucent) fill.
+The space is reserved as soon as the switch is turned on, not when the list opens: the card is centered, so growing it at open time moved the
+trigger after the popup had measured its position and the first list floated too low. The list is also closed whenever the switch goes off or
+the dialog reopens, so it never loses its anchor.
 Verified in the real shell over a white window with sharp text. A `openDisks` payload flag exists only so that look can be checked from a script.
 
 ### D7 — Progress and shutdown windows (FR-011..013, US5)

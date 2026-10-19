@@ -74,7 +74,7 @@ Item {
     if (root.view === "dialog") {
       root.closeOnExit = true
       root.allMonitors = false
-      root.mountDisks = false
+      root.mountDisks = !!payload.mountDisks   // test hook: start with the switch on
       root.selectedDisks = []
       root.answersFile = payload.answersFile || ""
       root.diskOptions = payload.disks || []
@@ -299,6 +299,7 @@ Item {
           }
 
           Row {
+            id: buttonsRow
             visible: root.view === "dialog"
             anchors.right: parent.right
             spacing: Style.spacing.huge
@@ -324,14 +325,16 @@ Item {
             }
           }
 
-          // The disk list is drawn in this same surface and the compositor only blurs where
-          // the card is (the popup sat half outside it and looked flat). While the list is
-          // open the card grows by the list's height, so the whole popup stays over the card.
+          // The disk list is drawn in this same surface and the compositor only blurs where the
+          // card is, so the whole popup must stay over the card. The space is reserved as soon as
+          // the switch is on (not when the list opens): the card is centered, so growing it at that
+          // moment moved the trigger after the popup had measured its position and left the first
+          // list floating too low. The list covers the (hidden) buttons row too, so only the rest
+          // of its height is added.
           Item {
             visible: root.view === "dialog"
             width: parent.width
-            height: (diskSelect.popupOpen && root.mountDisks) ? root.diskListHeight : 0
-            Behavior on height { NumberAnimation { duration: 120 } }
+            height: root.mountDisks ? Math.max(0, root.diskListHeight - buttonsRow.height - Style.spacing.huge) : 0
           }
 
           // ------------------------------------------------ progress view
