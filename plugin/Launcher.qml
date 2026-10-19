@@ -264,9 +264,11 @@ Item {
             width: parent.width
             height: visible ? implicitHeight : 0
             label: "Disks"
-            // The popup floats over the Cancel/Start buttons; the theme's popup fill is
-            // translucent, which made the names unreadable. Same color, fully opaque.
-            background: Qt.rgba(root.background.r, root.background.g, root.background.b, 1)
+            // The popup floats over the Cancel/Start buttons and the theme's popup fill is
+            // too transparent to read on. Use the card's color at 88% alpha: above the
+            // `ignore_alpha = 0.5` of the user's blur layer rule, so the compositor blurs
+            // what is behind it, and dense enough for the names to stay legible.
+            background: Qt.rgba(root.background.r, root.background.g, root.background.b, 0.88)
             options: root.diskOptions
             values: root.selectedDisks
             emptyText: "No external disks found"
@@ -279,6 +281,10 @@ Item {
             visible: root.view === "dialog"
             anchors.right: parent.right
             spacing: Style.spacing.huge
+            // The disk list opens over these buttons; hide them meanwhile so they
+            // cannot show through the blurred popup.
+            opacity: diskSelect.popupOpen ? 0 : 1
+            Behavior on opacity { NumberAnimation { duration: 120 } }
 
             Button {
               text: "Cancel"
