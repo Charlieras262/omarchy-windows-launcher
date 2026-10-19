@@ -1,0 +1,15 @@
+{"blockdevices":[
+ {"name":"sda","path":"/dev/sda","type":"disk","size":500107862016,"model":"MKNSSDSR500GB-D8","label":null,"fstype":null,"tran":"sata","rm":false,"hotplug":false,"mountpoints":[],
+  "children":[{"name":"sda1","path":"/dev/sda1","type":"part","size":500106788864,"model":null,"label":"Data","fstype":"ext4","tran":null,"rm":false,"hotplug":false,"mountpoints":["/media/Data"]}]},
+ {"name":"sdb","path":"/dev/sdb","type":"disk","size":1000204886016,"model":"TOSHIBA MQ04ABF100","label":null,"fstype":null,"tran":"sata","rm":false,"hotplug":false,"mountpoints":[],
+  "children":[{"name":"sdb1","path":"/dev/sdb1","type":"part","size":1000202043392,"model":null,"label":"Storage","fstype":"ntfs","tran":null,"rm":false,"hotplug":false,"mountpoints":["/media/Storage"]}]},
+ {"name":"sdc","path":"/dev/sdc","type":"disk","size":61951246336,"model":"DataTraveler 70","label":null,"fstype":null,"tran":"usb","rm":true,"hotplug":true,"mountpoints":[],
+  "children":[{"name":"sdc1","path":"/dev/sdc1","type":"part","size":61949000000,"model":null,"label":"Windows USB","fstype":"ntfs","tran":null,"rm":true,"hotplug":true,"mountpoints":["/run/media/charlie/Windows USB"]},
+              {"name":"sdc2","path":"/dev/sdc2","type":"part","size":1048576,"model":null,"label":"UEFI_NTFS","fstype":"vfat","tran":null,"rm":true,"hotplug":true,"mountpoints":[]}]},
+ {"name":"zram0","path":"/dev/zram0","type":"disk","size":33400000000,"model":null,"label":null,"fstype":null,"tran":null,"rm":false,"hotplug":false,"mountpoints":["[SWAP]"]},
+ {"name":"nvme0n1","path":"/dev/nvme0n1","type":"disk","size":1000204886016,"model":"KINGSTON SNV2S1000G","label":null,"fstype":null,"tran":"nvme","rm":false,"hotplug":false,"mountpoints":[],
+  "children":[
+   {"name":"nvme0n1p1","path":"/dev/nvme0n1p1","type":"part","size":2147483648,"model":null,"label":null,"fstype":"vfat","tran":null,"rm":false,"hotplug":false,"mountpoints":["/boot"]},
+   {"name":"nvme0n1p2","path":"/dev/nvme0n1p2","type":"part","size":998000000000,"model":null,"label":null,"fstype":"crypto_LUKS","tran":null,"rm":false,"hotplug":false,"mountpoints":[],
+    "children":[{"name":"root","path":"/dev/mapper/root","type":"crypt","size":997900000000,"model":null,"label":null,"fstype":"btrfs","tran":null,"rm":false,"hotplug":false,"mountpoints":["/var/lib/omarchy/windows/mounts/users/1000/storage","/var/log","/home","/"]}]}]}
+]}

@@ -1,0 +1,13 @@
+{"blockdevices":[
+ {"name":"sdd","path":"/dev/sdd","type":"disk","size":0,"model":"Card Reader","label":null,"fstype":null,"tran":"usb","rm":true,"hotplug":true,"mountpoints":[]},
+ {"name":"loop0","path":"/dev/loop0","type":"loop","size":1000000,"model":null,"label":null,"fstype":null,"tran":null,"rm":false,"hotplug":false,"mountpoints":["/snap/x"]},
+ {"name":"sr0","path":"/dev/sr0","type":"rom","size":1000000000,"model":"DVD","label":null,"fstype":null,"tran":"sata","rm":true,"hotplug":true,"mountpoints":[]},
+ {"name":"sde","path":"/dev/sde","type":"disk","size":2000000000000,"model":"  External HDD  ","label":null,"fstype":null,"tran":"usb","rm":false,"hotplug":false,"mountpoints":[],
+  "children":[{"name":"sde1","path":"/dev/sde1","type":"part","size":1999000000000,"model":null,"label":null,"fstype":"exfat","tran":null,"rm":false,"hotplug":false,"mountpoints":[]}]},
+ {"name":"sdf","path":"/dev/sdf","type":"disk","size":1000000000000,"model":"Second system disk","label":null,"fstype":null,"tran":"sata","rm":false,"hotplug":false,"mountpoints":[],
+  "children":[{"name":"sdf1","path":"/dev/sdf1","type":"part","size":1000000000000,"model":null,"label":"other","fstype":"ext4","tran":null,"rm":false,"hotplug":false,"mountpoints":["/var/lib/docker"]}]},
+ {"name":"sdg","path":"/dev/sdg","type":"disk","size":500000000000,"model":"Swap disk","label":null,"fstype":null,"tran":"sata","rm":false,"hotplug":false,"mountpoints":[],
+  "children":[{"name":"sdg1","path":"/dev/sdg1","type":"part","size":500000000000,"model":null,"label":null,"fstype":"swap","tran":null,"rm":false,"hotplug":false,"mountpoints":["[SWAP]"]}]},
+ {"name":"sdh","path":"/dev/sdh","type":"disk","size":500000000000,"model":"VM storage disk","label":null,"fstype":null,"tran":"sata","rm":false,"hotplug":false,"mountpoints":[],
+  "children":[{"name":"sdh1","path":"/dev/sdh1","type":"part","size":500000000000,"model":null,"label":"vm","fstype":"ext4","tran":null,"rm":false,"hotplug":false,"mountpoints":["/mnt/vmdata"]}]}
+]}
