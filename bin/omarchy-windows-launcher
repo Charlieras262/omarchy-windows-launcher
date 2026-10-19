@@ -80,15 +80,24 @@ ask_options() {
 
 # ----------------------------------------------------------------- bar
 
+# NOTE the inverted wording: `omarchy-toggle-bar` drives a flag called `bar-off`, so
+# `on` means "bar-off is on" = the bar is HIDDEN and `off` removes the flag = bar visible.
+# (Using them the other way round hides the bar after the session instead of during it.)
+OWL_TOGGLES_DIR=${OWL_TOGGLES_DIR:-$HOME/.local/state/omarchy/toggles}
+bar_is_hidden() { [[ -f $OWL_TOGGLES_DIR/bar-off ]]; }
+
+# Hide the bar for the session, but only record it as ours if it was visible, so a bar
+# the user had already hidden stays hidden afterwards (FR-019).
 hide_bar() {
+  bar_is_hidden && return 0
   hid_bar=true
   owl_state_patch '.hidBar = true'
-  "$OWL_BAR_CMD" off >/dev/null 2>&1
+  "$OWL_BAR_CMD" on >/dev/null 2>&1
 }
 
 restore_bar() {
   [[ $hid_bar == true ]] || return 0
-  "$OWL_BAR_CMD" on >/dev/null 2>&1
+  "$OWL_BAR_CMD" off >/dev/null 2>&1
   hid_bar=false
   owl_state_patch '.hidBar = false'
 }

@@ -122,7 +122,7 @@ consecutive ticks, then stops so a manual resize afterwards is respected; every 
 `$XDG_RUNTIME_DIR/omarchy-windows-launcher/placement.log`. 
 
 Bar: before connecting, the orchestrator records whether the bar is currently hidden, then runs
-`omarchy toggle bar off` (stock command; it sets the toggles flag and nudges the shell). `finalize` runs
+`omarchy toggle bar on` (**inverted wording**: the command drives a flag named `bar-off`, so `on` = flag present = bar hidden and `off` = bar shown; the first version had them swapped and hid the bar only after the session) (stock command; it sets the toggles flag and nudges the shell). `finalize` runs
 `omarchy toggle bar on` only if the orchestrator was the one that hid it, so a bar the user had already
 hidden stays hidden. It is restored on every exit path, including a failed launch after hiding. The
 state it needs ("we hid the bar") lives in the session state file so a restarted orchestrator can still

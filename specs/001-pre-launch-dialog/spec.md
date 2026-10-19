@@ -169,7 +169,7 @@ before doing anything else.
 - **FR-026** In all-monitors mode the main window MUST be floating and sized/positioned as in US3.1,
   and the remote desktop MUST follow the window size (dynamic resolution).
 - **FR-019** Option 2 on ⇒ the Omarchy bar is hidden (with the stock `omarchy toggle bar`
-  command) while the Windows window is open and restored afterwards, only if this feature
+  command, whose `on` means "bar-off flag set", i.e. hidden) while the Windows window is open and restored afterwards, only if this feature
   was the one that hid it, on every exit path (normal close, failure, cancel, crash).
 - **FR-005** Option 3 on ⇒ reveal a multi-select list of eligible disks; off ⇒ hide it
   and attach nothing.
