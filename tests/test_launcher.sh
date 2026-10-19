@@ -44,11 +44,14 @@ case "\$1" in
     pid=\$(cat "$T/run/rdp-started" 2>/dev/null); pid=\${pid:-0}
     n=\$(grep -c 'window.resize' "$T/calls" 2>/dev/null); n=\${n:-0}
     # The X11 client keeps resetting its size until we have asserted it twice.
-    if (( n >= \${FAKE_STICK_AFTER:-1} )); then sz='[4880,1440]'; at='[0,0]'; else sz='[800,600]'; at='[300,200]'; fi
-    jq -n --argjson pid "\$pid" --argjson sz "\$sz" --argjson at "\$at" '[
-      {address:"0xmain",  pid:\$pid, title:"Windows VM - Omarchy", workspace:{id:4}, size:\$sz, at:\$at},
-      {address:"0xpopup", pid:\$pid, title:"FreeRDP: dialog",      workspace:{id:1}, size:[300,200], at:[10,10]},
-      {address:"0xother", pid:1,     title:"Terminal",              workspace:{id:1}, size:[1,1], at:[0,0]}]' ;;
+    if (( n >= \${FAKE_STICK_AFTER:-1} )); then sz='[4880,2560]'; at='[0,0]'; else sz='[800,600]'; at='[300,200]'; fi
+    # The /f client starts fullscreen and tiled; it only changes when we ask.
+    fs=2; grep -q 'action = "unset"' "$T/calls" 2>/dev/null && fs=0
+    fl=false; grep -q 'window.float' "$T/calls" 2>/dev/null && fl=true
+    jq -n --argjson pid "\$pid" --argjson sz "\$sz" --argjson at "\$at" --argjson fs "\$fs" --argjson fl "\$fl" '[
+      {address:"0xmain",  pid:\$pid, title:"Windows VM - Omarchy", workspace:{id:4}, size:\$sz, at:\$at, floating:\$fl, fullscreen:\$fs},
+      {address:"0xpopup", pid:\$pid, title:"FreeRDP: dialog",      workspace:{id:1}, size:[300,200], at:[10,10], floating:true, fullscreen:0},
+      {address:"0xother", pid:1,     title:"Terminal",              workspace:{id:1}, size:[1,1], at:[0,0], floating:false, fullscreen:0}]' ;;
   dispatch) echo "dsp \$2" >> "$T/calls" ;;
 esac
 FAKE
@@ -100,7 +103,7 @@ echo "all monitors"
 setup
 export TEST_ANSWER='{"action":"start","closeOnExit":true,"allMonitors":true,"disks":[]}'
 assert_eq "exits 0" "0" "$(run)"
-assert_eq "RDP is not asked for FreeRDP multimon (the window is stretched instead)" "no" "$(has 'multimon' && echo yes || echo no)"
+assert_eq "RDP is told about all the monitors so the remote desktop is one canvas" "yes" "$(has '^rdp .*/multimon:force /f' && echo yes || echo no)"
 assert_eq "bar is hidden then restored, in that order" "bar off|bar on" "$(calls | grep '^bar ' | paste -sd'|')"
 assert_eq "bar flag is cleared in the state" "false" "$(jq -r .hidBar "$T/run/state.json")"
 teardown
@@ -111,13 +114,14 @@ export FAKE_VM_HOLD=2.5 FAKE_STICK_AFTER=2 TEST_ANSWER='{"action":"start","close
 assert_eq "exits 0" "0" "$(run)"
 assert_eq "geometry is re-asserted when the client resets it" "yes" "$( (( $(calls | grep -c window.resize) >= 2 )) && echo yes || echo no)"
 assert_eq "...and stops once the window holds the target (no endless fighting)" "yes" "$( (( $(calls | grep -c 'window.resize') <= 4 )) && echo yes || echo no)"
-assert_eq "placement log records the target box" "yes" "$(grep -q 'target box: 0 0 4880 1440' "$T/run/placement.log" && echo yes || echo no)"
+assert_eq "placement log records the target box" "yes" "$(grep -q 'target box: 0 0 4880 2560' "$T/run/placement.log" && echo yes || echo no)"
 assert_eq "placement log records that it settled" "yes" "$(grep -q settled "$T/run/placement.log" && echo yes || echo no)"
+assert_eq "the fullscreen state requested by /f is lifted before floating" "yes" "$(has 'dsp hl.dsp.window.fullscreen\(\{ mode = "fullscreen", action = "unset", window = "address:0xmain"' && echo yes || echo no)"
+assert_eq "fullscreen is lifted first, then float, resize, move" "fullscreen float resize move" \
+  "$(calls | grep '^dsp' | grep 0xmain | head -4 | grep -oE 'window\.(fullscreen|float|resize|move)' | sed 's/window\.//' | paste -sd' ')"
 assert_eq "main window is made floating" "yes" "$(has 'dsp hl.dsp.window.float\(\{ action = "enable", window = "address:0xmain"' && echo yes || echo no)"
-assert_eq "main window spans 4880x1440" "yes" "$(has 'dsp hl.dsp.window.resize\(\{ x = 4880, y = 1440, window = "address:0xmain"' && echo yes || echo no)"
+assert_eq "main window covers the whole 4880x2560 canvas" "yes" "$(has 'dsp hl.dsp.window.resize\(\{ x = 4880, y = 2560, window = "address:0xmain"' && echo yes || echo no)"
 assert_eq "main window is moved to the top-left of the leftmost monitor" "yes" "$(has 'dsp hl.dsp.window.move\(\{ x = 0, y = 0, window = "address:0xmain"' && echo yes || echo no)"
-assert_eq "geometry is applied in float → resize → move order" "float resize move" \
-  "$(calls | grep '^dsp' | grep 0xmain | grep -oE 'window\.(float|resize|move)' | head -3 | sed 's/window\.//' | paste -sd' ')"
 assert_eq "a popup of the RDP client follows the main window to workspace 4" "yes" "$(has 'dsp hl.dsp.window.move\(\{ workspace = "4", follow = false, window = "address:0xpopup"' && echo yes || echo no)"
 assert_eq "windows of other processes are never touched" "no" "$(has '0xother' && echo yes || echo no)"
 assert_eq "the main window is not moved to a workspace (the user's own rule decides)" "no" "$(has 'workspace = "[0-9]*", follow = false, window = "address:0xmain"' && echo yes || echo no)"

@@ -20,9 +20,10 @@ OWL_VM_CMD=${OWL_VM_CMD:-omarchy-windows-vm}
 OWL_SHELL_CMD=${OWL_SHELL_CMD:-omarchy-shell}
 OWL_NOTIFY_CMD=${OWL_NOTIFY_CMD:-omarchy-notification-send}
 OWL_BAR_CMD=${OWL_BAR_CMD:-omarchy-toggle-bar}
-# Extra FreeRDP flags appended by the shim. Empty by default: "all monitors" is done
-# by floating and stretching the window (lib/layout.sh), not by FreeRDP multi-monitor.
-OWL_RDP_EXTRA=${OWL_RDP_EXTRA:-}
+# Extra FreeRDP flags appended by the shim in all-monitors mode. FreeRDP must be told
+# about the monitors (/multimon) so the remote desktop is one canvas covering all of
+# them; Hyprland then floats and stretches the window over the same area (lib/layout.sh).
+OWL_RDP_EXTRA=${OWL_RDP_EXTRA:-/multimon:force /f}
 OWL_HYPRCTL=${OWL_HYPRCTL:-hyprctl}
 OWL_WINDOW_TITLE=${OWL_WINDOW_TITLE:-Windows VM - Omarchy}
 # install.sh records the command the user's own desktop entry used to launch the
@@ -113,14 +114,15 @@ SHIM
 
 dsp() { "$OWL_HYPRCTL" dispatch "$1" >/dev/null 2>&1; }
 
-# Windows of the RDP client process, one per line: "address workspace x y w h title".
+# Windows of the RDP client process, one per line:
+# "address workspace x y w h floating fullscreen title".
 rdp_windows() {
   local pid
   pid=$(cat "$OWL_RUNTIME_DIR/rdp-started" 2>/dev/null) || return 0
   [[ $pid =~ ^[0-9]+$ ]] || return 0
   "$OWL_HYPRCTL" clients -j 2>/dev/null |
     jq -r --argjson pid "$pid" '.[] | select(.pid == $pid)
-      | "\(.address) \(.workspace.id) \(.at[0]) \(.at[1]) \(.size[0]) \(.size[1]) \(.title)"'
+      | "\(.address) \(.workspace.id) \(.at[0]) \(.at[1]) \(.size[0]) \(.size[1]) \(.floating) \(.fullscreen) \(.title)"'
 }
 
 plog() { printf '%s %s\n' "$(date +%T.%3N)" "$*" >>"$OWL_RUNTIME_DIR/placement.log"; }
@@ -128,12 +130,16 @@ plog() { printf '%s %s\n' "$(date +%T.%3N)" "$*" >>"$OWL_RUNTIME_DIR/placement.l
 # Target box for the stretched window ("x y w h"), computed once per session.
 span_box=""
 
-# Float the main window and stretch it over every monitor, top-aligned
+# Take the main window out of fullscreen (the /f client requests it; a fullscreen window
+# cannot be floated or sized), float it and stretch it over every monitor, top-aligned
 # (the user's workspace rule for the window keeps applying; we only change geometry).
 place_window() {
-  local addr="$1" x y w h
+  local addr="$1" fullscreen="${2:-0}" x y w h
   read -r x y w h <<<"$span_box"
   [[ -n ${h:-} ]] || return 1
+  if [[ $fullscreen != 0 ]]; then
+    dsp "hl.dsp.window.fullscreen({ mode = \"fullscreen\", action = \"unset\", window = \"address:$addr\" })"
+  fi
   dsp "hl.dsp.window.float({ action = \"enable\", window = \"address:$addr\" })"
   dsp "hl.dsp.window.resize({ x = $w, y = $h, window = \"address:$addr\" })"
   dsp "hl.dsp.window.move({ x = $x, y = $y, window = \"address:$addr\" })"
@@ -146,7 +152,7 @@ place_window() {
 # Every other window of the RDP client (popups, dialogs) is kept on the main window's
 # workspace, in every mode.
 watch_windows() {
-  local all_monitors="$1" main_ws="" addr ws x y w h title lines
+  local all_monitors="$1" main_ws="" addr ws x y w h floating fullscreen title lines
   local attempts=0 stable=0 settled=false tx ty tw th
   if [[ $all_monitors == true ]]; then
     span_box=$("$OWL_HYPRCTL" monitors -j 2>/dev/null | owl_span_geometry)
@@ -157,28 +163,28 @@ watch_windows() {
     main_ws=""
     lines=$(rdp_windows)
     [[ -n $lines ]] || continue
-    while read -r addr ws x y w h title; do
+    while read -r addr ws x y w h floating fullscreen title; do
       [[ $title == "$OWL_WINDOW_TITLE" ]] || continue
       main_ws=$ws
       [[ $all_monitors == true && $settled == false && -n ${th:-} ]] || continue
-      if ((x == tx && y == ty && w == tw && h == th)); then
+      if ((x == tx && y == ty && w == tw && h == th)) && [[ $floating == true && $fullscreen == 0 ]]; then
         stable=$((stable + 1))
-        plog "ok at=${x},${y} size=${w}x${h} (stable $stable)"
+        plog "ok at=${x},${y} size=${w}x${h} floating=$floating fullscreen=$fullscreen (stable $stable)"
         ((stable >= ${OWL_STABLE_TICKS:-4})) && settled=true && plog "settled"
       else
         stable=0
         attempts=$((attempts + 1))
-        plog "attempt $attempts: window at=${x},${y} size=${w}x${h}, want ${span_box}"
+        plog "attempt $attempts: window at=${x},${y} size=${w}x${h} floating=$floating fullscreen=$fullscreen, want ${span_box}"
         if ((attempts > ${OWL_MAX_ATTEMPTS:-60})); then
           settled=true
           plog "giving up after $attempts attempts"
         else
-          place_window "$addr"
+          place_window "$addr" "$fullscreen"
         fi
       fi
     done <<<"$lines"
     [[ -n $main_ws ]] || continue
-    while read -r addr ws x y w h title; do
+    while read -r addr ws x y w h floating fullscreen title; do
       [[ $title == "$OWL_WINDOW_TITLE" || $ws == "$main_ws" ]] && continue
       dsp "hl.dsp.window.move({ workspace = \"$main_ws\", follow = false, window = \"address:$addr\" })"
     done <<<"$lines"

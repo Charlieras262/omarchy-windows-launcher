@@ -64,10 +64,10 @@ asks me three things. I confirm with **Start** or abort with **Cancel**.
 
 1. *Given* option 2 is **on** and I have N connected monitors, *when* the Windows
    window opens, *then* it is a single **floating** window that starts at the left edge of
-   the leftmost monitor and reaches the right edge of the rightmost one, aligned to the top
-   (so its top-right corner is the top-right corner of the rightmost monitor), as tall as the
-   shortest monitor so no part hangs off a screen; and the Omarchy bar is hidden so it does
-   not overlap the VM.
+   the leftmost monitor and reaches the right edge of the rightmost one, aligned to the top,
+   and covers the whole multi-monitor area (parts beyond a shorter monitor are simply outside
+   the screens); the remote desktop sees every monitor (one canvas, not one monitor); and the
+   Omarchy bar is hidden so it does not overlap the VM.
 2. *Given* the bar was hidden by this feature, *when* the Windows window closes (or the
    launch fails or is cancelled after the bar was hidden), *then* the bar is shown again.
 3. *Given* the bar was **already hidden** before I launched, *then* it is left hidden

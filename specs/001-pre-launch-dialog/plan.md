@@ -92,13 +92,22 @@ Fallback if copying the RDP argument list proves fragile across Omarchy updates:
 with a `PATH` shim for `xfreerdp3` to inject extra flags. Spike S1 decides which.
 
 ### D3 — All monitors, window placement and bar hiding (FR-004, FR-019, FR-024..026, US3)
-**Decision (supersedes the FreeRDP `/multimon` idea):** FreeRDP multi-monitor is not used. The main window is
-made floating and stretched over every monitor with Hyprland itself, because a floating window may straddle outputs
-and the packaged launcher already passes `/dynamic-resolution`, so the remote desktop follows the window size.
+**Two parts, both required.** (1) FreeRDP must be told about the monitors (`/multimon:force /f`, injected by the shim),
+otherwise the remote desktop is a single-monitor session no matter how big the window is — a window stretched over two
+screens would just show one monitor's desktop. This was learned the hard way: a first version that dropped `/multimon` and
+only resized the window showed one monitor. (2) Hyprland then floats and stretches that window over the same area, because a
+floating window may straddle outputs and the packaged launcher already passes `/dynamic-resolution`.
+
 `lib/layout.sh` computes the box from `hyprctl monitors -j`: left edge of the leftmost monitor to the right edge of the
-rightmost, top-aligned, height of the shortest monitor, in logical pixels (scale applied, rotated outputs swapped; on this
-machine: portrait DP-1 + ultrawide DP-2 → `0 0 4880 1440`). Placement uses the Lua dispatchers of this Hyprland (0.56):
-`hl.dsp.window.float/resize/move` with `window = "address:…"`, verified on a throwaway window. Single-monitor path is untouched.
+rightmost, top-aligned, covering the whole canvas (logical pixels, scale applied, rotated outputs swapped; on this machine
+portrait DP-1 + ultrawide DP-2 → `0 0 4880 2560`; the `min` mode that limits the height to the shortest monitor is kept for
+other uses). Placement uses the Lua dispatchers of this Hyprland (0.56), verified on a throwaway window: `float` and `move`/`resize`
+with `window = "address:…"`. The `/f` client starts **fullscreen**, and a fullscreen window cannot be floated or sized (float only sets
+the flag), so placement first lifts fullscreen with `fullscreen({ mode = "fullscreen", action = "unset" })`. Single-monitor path untouched.
+Observed: Hyprland accepts a 4880-wide floating window (no clamping), but the **X11** FreeRDP client (it runs through XWayland)
+re-requests its own size while the session comes up, so the watcher re-asserts the box until the window has held it for a few
+consecutive ticks, then stops so a manual resize afterwards is respected; every attempt is logged to
+`$XDG_RUNTIME_DIR/omarchy-windows-launcher/placement.log`.
 
 Window identity and rules: the shim records the RDP client's PID; the launcher finds its windows by PID, not by class (the
 class is only knowable once a real session is open). The user's own rule by title (`o.window({ title = "Windows VM - Omarchy" },
@@ -110,7 +119,7 @@ Observed on this machine: Hyprland accepts a 4880x1440 floating window at 0,0 (n
 **X11** build (it runs through XWayland) and re-requests its own size while the session comes up, which left a small floating
 window when the geometry was applied only once. The watcher therefore re-asserts the box until the window has held it for a few
 consecutive ticks, then stops so a manual resize afterwards is respected; every attempt is logged to
-`$XDG_RUNTIME_DIR/omarchy-windows-launcher/placement.log`. Spike S2 still checks mixed-DPI behaviour live.
+`$XDG_RUNTIME_DIR/omarchy-windows-launcher/placement.log`. 
 
 Bar: before connecting, the orchestrator records whether the bar is currently hidden, then runs
 `omarchy toggle bar off` (stock command; it sets the toggles flag and nudges the shell). `finalize` runs

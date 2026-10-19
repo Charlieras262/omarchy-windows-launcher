@@ -6,13 +6,16 @@
 #
 # Sourced; no side effects at source time. Requires jq.
 
-# Bounding box shared by all monitors, as "x y width height" in layout pixels:
-# from the left edge of the leftmost monitor to the right edge of the rightmost,
-# top-aligned, as tall as the shortest monitor so no part hangs off a screen.
-# Stdin: `hyprctl monitors -j`. Rotated monitors (odd transform) swap width/height;
-# scale divides to logical pixels.
+# Bounding box of all monitors, as "x y width height" in layout pixels: from the left edge
+# of the leftmost monitor to the right edge of the rightmost, top-aligned. This is also the
+# canvas FreeRDP's multi-monitor session paints (every monitor is part of one remote
+# desktop), so the window must cover the whole box; parts beyond a shorter monitor are
+# simply outside the screens. Argument "min" instead limits the height to the shortest
+# monitor. Stdin: `hyprctl monitors -j`. Rotated monitors (odd transform) swap
+# width/height; scale divides to logical pixels.
 owl_span_geometry() {
-  jq -r '
+  local mode="${1:-max}"
+  jq -r --arg mode "$mode" '
     def logical:
       (.scale // 1) as $s
       | (if (.transform % 2) == 1 then {w: .height, h: .width} else {w: .width, h: .height} end)
@@ -24,7 +27,7 @@ owl_span_geometry() {
         (map(.x) | min) as $x0
         | (map(.y) | min) as $y0
         | (map(.x + .w) | max) as $x1
-        | (map(.h) | min) as $h
+        | (if $mode == "min" then (map(.h) | min) else (map(.y + .h) | max) - $y0 end) as $h
         | "\($x0 | floor) \($y0 | floor) \(($x1 - $x0) | floor) \($h | floor)"
       end'
 }
