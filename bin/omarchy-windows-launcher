@@ -113,47 +113,72 @@ SHIM
 
 dsp() { "$OWL_HYPRCTL" dispatch "$1" >/dev/null 2>&1; }
 
-# Windows of the RDP client process: "address workspace title" per line.
+# Windows of the RDP client process, one per line: "address workspace x y w h title".
 rdp_windows() {
   local pid
   pid=$(cat "$OWL_RUNTIME_DIR/rdp-started" 2>/dev/null) || return 0
   [[ $pid =~ ^[0-9]+$ ]] || return 0
   "$OWL_HYPRCTL" clients -j 2>/dev/null |
-    jq -r --argjson pid "$pid" '.[] | select(.pid == $pid) | "\(.address) \(.workspace.id) \(.title)"'
+    jq -r --argjson pid "$pid" '.[] | select(.pid == $pid)
+      | "\(.address) \(.workspace.id) \(.at[0]) \(.at[1]) \(.size[0]) \(.size[1]) \(.title)"'
 }
+
+plog() { printf '%s %s\n' "$(date +%T.%3N)" "$*" >>"$OWL_RUNTIME_DIR/placement.log"; }
+
+# Target box for the stretched window ("x y w h"), computed once per session.
+span_box=""
 
 # Float the main window and stretch it over every monitor, top-aligned
 # (the user's workspace rule for the window keeps applying; we only change geometry).
 place_window() {
-  local addr="$1" geo x y w h
-  geo=$("$OWL_HYPRCTL" monitors -j 2>/dev/null | owl_span_geometry) || return 1
-  read -r x y w h <<<"$geo"
+  local addr="$1" x y w h
+  read -r x y w h <<<"$span_box"
   [[ -n ${h:-} ]] || return 1
   dsp "hl.dsp.window.float({ action = \"enable\", window = \"address:$addr\" })"
   dsp "hl.dsp.window.resize({ x = $w, y = $h, window = \"address:$addr\" })"
   dsp "hl.dsp.window.move({ x = $x, y = $y, window = \"address:$addr\" })"
 }
 
-# Runs for the whole session: places the main window once (all-monitors mode) and
-# keeps every other window of the RDP client (popups, dialogs) on the main window's
-# workspace, so they never land on whatever workspace happens to be focused.
+# Runs for the whole session. In all-monitors mode it places the main window and then
+# re-asserts the geometry until it sticks: the X11 FreeRDP client re-requests its own size
+# while the session comes up, which would otherwise leave a small floating window. It stops
+# after the window has held the target for a few ticks, so a later manual resize is respected.
+# Every other window of the RDP client (popups, dialogs) is kept on the main window's
+# workspace, in every mode.
 watch_windows() {
-  local all_monitors="$1" placed=false main_ws="" addr ws title
+  local all_monitors="$1" main_ws="" addr ws x y w h title lines
+  local attempts=0 stable=0 settled=false tx ty tw th
+  if [[ $all_monitors == true ]]; then
+    span_box=$("$OWL_HYPRCTL" monitors -j 2>/dev/null | owl_span_geometry)
+    read -r tx ty tw th <<<"$span_box"
+    plog "target box: ${span_box:-none}"
+  fi
   while sleep "${OWL_WATCH:-0.5}"; do
     main_ws=""
-    local lines
     lines=$(rdp_windows)
     [[ -n $lines ]] || continue
-    while read -r addr ws title; do
-      if [[ $title == "$OWL_WINDOW_TITLE" ]]; then
-        main_ws=$ws
-        if [[ $all_monitors == true && $placed == false ]]; then
-          place_window "$addr" && placed=true
+    while read -r addr ws x y w h title; do
+      [[ $title == "$OWL_WINDOW_TITLE" ]] || continue
+      main_ws=$ws
+      [[ $all_monitors == true && $settled == false && -n ${th:-} ]] || continue
+      if ((x == tx && y == ty && w == tw && h == th)); then
+        stable=$((stable + 1))
+        plog "ok at=${x},${y} size=${w}x${h} (stable $stable)"
+        ((stable >= ${OWL_STABLE_TICKS:-4})) && settled=true && plog "settled"
+      else
+        stable=0
+        attempts=$((attempts + 1))
+        plog "attempt $attempts: window at=${x},${y} size=${w}x${h}, want ${span_box}"
+        if ((attempts > ${OWL_MAX_ATTEMPTS:-60})); then
+          settled=true
+          plog "giving up after $attempts attempts"
+        else
+          place_window "$addr"
         fi
       fi
     done <<<"$lines"
     [[ -n $main_ws ]] || continue
-    while read -r addr ws title; do
+    while read -r addr ws x y w h title; do
       [[ $title == "$OWL_WINDOW_TITLE" || $ws == "$main_ws" ]] && continue
       dsp "hl.dsp.window.move({ workspace = \"$main_ws\", follow = false, window = \"address:$addr\" })"
     done <<<"$lines"

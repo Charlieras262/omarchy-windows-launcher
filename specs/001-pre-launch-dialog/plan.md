@@ -106,7 +106,11 @@ class is only knowable once a real session is open). The user's own rule by titl
 whole session and moves every other window of that PID (popups, dialogs) to the main window's workspace with
 `hl.dsp.window.move({ workspace, follow = false })`. Window rules cannot express "same workspace as another window", hence the
 watcher. The launcher's own overlay windows (dialog, progress) are layer-shell surfaces and are not tied to a workspace.
-Spike S2 still checks mixed-DPI behaviour live.
+Observed on this machine: Hyprland accepts a 4880x1440 floating window at 0,0 (no clamping), but the FreeRDP client is the
+**X11** build (it runs through XWayland) and re-requests its own size while the session comes up, which left a small floating
+window when the geometry was applied only once. The watcher therefore re-asserts the box until the window has held it for a few
+consecutive ticks, then stops so a manual resize afterwards is respected; every attempt is logged to
+`$XDG_RUNTIME_DIR/omarchy-windows-launcher/placement.log`. Spike S2 still checks mixed-DPI behaviour live.
 
 Bar: before connecting, the orchestrator records whether the bar is currently hidden, then runs
 `omarchy toggle bar off` (stock command; it sets the toggles flag and nudges the shell). `finalize` runs
