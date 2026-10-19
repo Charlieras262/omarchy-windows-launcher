@@ -69,8 +69,8 @@ clarification in `spec.md` §7 is resolved (done as of this revision).
 - [x] **T30** Orchestrator: build RDP monitor flags from `hyprctl monitors -j` per S2; single-monitor path unchanged. — FR-004
 - [x] **T33** Float, resize and move the main window across all monitors (`lib/layout.sh`, tested against fixtures and a fake `hyprctl`). — FR-026
 - [x] **T34** Watcher keeps the RDP client's popups on the main window's workspace; user's title rule untouched. — FR-024, FR-025
-- [x] **T32** Hide the bar with `omarchy toggle bar off` when option 2 is on; record whether it was already hidden; restore with
-      `omarchy toggle bar on` in `finalize` on every exit path only if we hid it. Test: normal close, failed launch after hiding,
+- [x] **T32** Hide the bar with `omarchy toggle bar on` (flag `bar-off` set = hidden) when option 2 is on; record whether it was already hidden; restore with
+      `omarchy toggle bar off` (shown) in `finalize` on every exit path only if we hid it. Test: normal close, failed launch after hiding,
       killed orchestrator, bar already hidden beforehand. — FR-019, US3.2, US3.3
 - [ ] **T31** Dialog: option 2 wired; test with 1 and N monitors. — US3
 
