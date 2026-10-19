@@ -55,6 +55,5 @@ Categories=System;Virtualization;
 ENTRY
 
 omarchy-shell -q shell rescanPlugins || true
-echo "Installed. Enable the plugin if the shell does not load it:"
-echo "  omarchy plugin --help"
-echo "Open Windows from the launcher (Super + Space)."
+omarchy plugin enable "$PLUGIN_ID"
+echo "Installed. Open Windows from the launcher (Super + Space)."

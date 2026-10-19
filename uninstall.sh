@@ -23,6 +23,7 @@ Categories=System;Virtualization;
 ENTRY
 fi
 
+omarchy plugin disable "$PLUGIN_ID" 2>/dev/null || true
 rm -f "$HOME/.local/bin/omarchy-windows-launcher"
 rm -rf "$HOME/.config/omarchy/plugins/$PLUGIN_ID" "$DATA"
 omarchy-shell -q shell rescanPlugins || true
