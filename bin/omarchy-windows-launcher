@@ -26,6 +26,7 @@ OWL_BAR_CMD=${OWL_BAR_CMD:-omarchy-toggle-bar}
 OWL_RDP_EXTRA=${OWL_RDP_EXTRA:-/multimon:force /f}
 OWL_HYPRCTL=${OWL_HYPRCTL:-hyprctl}
 OWL_WINDOW_TITLE=${OWL_WINDOW_TITLE:-Windows VM - Omarchy}
+OWL_HYPR_CONFIG=${OWL_HYPR_CONFIG:-$HOME/.config/hypr/hyprland.lua}
 # install.sh records the command the user's own desktop entry used to launch the
 # VM (for example a personal wrapper that fixes permissions or audio) so we keep
 # honoring it instead of silently bypassing it.
@@ -123,6 +124,17 @@ SHIM
 
 dsp() { "$OWL_HYPRCTL" dispatch "$1" >/dev/null 2>&1; }
 
+# The workspace the user's own rule sends the Windows window to (OWL_WORKSPACE overrides).
+# Read from their Hyprland config so we never hard-code it; empty if there is no such rule.
+target_workspace() {
+  [[ -n ${OWL_WORKSPACE:-} ]] && { printf '%s' "$OWL_WORKSPACE"; return; }
+  [[ -r $OWL_HYPR_CONFIG ]] || return 0
+  grep -F -- "$OWL_WINDOW_TITLE" "$OWL_HYPR_CONFIG" 2>/dev/null |
+    sed -n 's/.*workspace *= *"\([0-9][0-9]*\)".*/\1/p' | head -n1
+}
+
+focus_workspace() { dsp "hl.dsp.focus({ workspace = \"$1\" })"; }
+
 # Windows of the RDP client process, one per line:
 # "address workspace x y w h floating fullscreen title".
 rdp_windows() {
@@ -179,13 +191,18 @@ watch_windows() {
       if ((x == tx && y == ty && w == tw && h == th)) && [[ $floating == true && $fullscreen == 0 ]]; then
         stable=$((stable + 1))
         plog "ok at=${x},${y} size=${w}x${h} floating=$floating fullscreen=$fullscreen (stable $stable)"
-        ((stable >= ${OWL_STABLE_TICKS:-4})) && settled=true && plog "settled"
+        if ((stable >= ${OWL_STABLE_TICKS:-4})); then
+          settled=true
+          : >"$OWL_RUNTIME_DIR/window-settled"
+          plog "settled"
+        fi
       else
         stable=0
         attempts=$((attempts + 1))
         plog "attempt $attempts: window at=${x},${y} size=${w}x${h} floating=$floating fullscreen=$fullscreen, want ${span_box}"
         if ((attempts > ${OWL_MAX_ATTEMPTS:-60})); then
           settled=true
+          : >"$OWL_RUNTIME_DIR/window-settled"
           plog "giving up after $attempts attempts"
         else
           place_window "$addr" "$fullscreen"
@@ -267,13 +284,22 @@ main() {
 
   owl_state_init || exit 1
 
+  # The dialog and progress windows are shell overlays, which appear on the focused
+  # monitor; move focus to the Windows workspace first so they show up where Windows will.
+  local ws prev_ws
+  ws=$(target_workspace)
+  prev_ws=$("$OWL_HYPRCTL" activeworkspace -j 2>/dev/null | jq -r '.id // empty')
+  [[ -n $ws && $ws != "$prev_ws" ]] && focus_workspace "$ws"
+
   local answers action close_on_exit all_monitors
   if ! answers=$(ask_options); then
+    [[ -n $ws && -n $prev_ws && $ws != "$prev_ws" ]] && focus_workspace "$prev_ws"
     log "no answer from the dialog"
     exit 1
   fi
   action=$(jq -r '.action // "cancel"' <<<"$answers")
   if [[ $action != start ]]; then
+    [[ -n $ws && -n $prev_ws && $ws != "$prev_ws" ]] && focus_workspace "$prev_ws"
     owl_state_stage cancelled "Cancelled"
     exit 0
   fi
@@ -288,13 +314,12 @@ main() {
   local extra="" shim
   if [[ $all_monitors == true ]]; then
     extra=$OWL_RDP_EXTRA
-    hide_bar
   fi
   shim=$(make_shim "$extra") || {
     owl_state_stage failed "Could not start" "xfreerdp3 was not found"
     exit 1
   }
-  rm -f -- "$OWL_RUNTIME_DIR/rdp-started"
+  rm -f -- "$OWL_RUNTIME_DIR/rdp-started" "$OWL_RUNTIME_DIR/window-settled"
 
   # Bring the VM up and connect. --keep-alive: the stop decision is ours.
   local out="$OWL_RUNTIME_DIR/vm.log"
@@ -320,8 +345,15 @@ main() {
     owl_state_stage running "Windows is ready"
     connecting=true
   }
+  # The bar goes away only once Windows is up and its window is in place, never while
+  # it is still booting (the user keeps the bar, clock and tray until then).
+  local bar_done=false
   while kill -0 "$vm_pid" 2>/dev/null; do
     mark_running
+    if [[ $all_monitors == true && $bar_done == false && -e $OWL_RUNTIME_DIR/window-settled ]]; then
+      hide_bar
+      bar_done=true
+    fi
     sleep 0.3
   done
   wait "$vm_pid"
@@ -331,6 +363,7 @@ main() {
   stop_watcher
   # The window may have opened and closed between two polls.
   mark_running
+  # (If the window settled between two polls and the client then exited, there is nothing left to hide the bar for.)
 
   if [[ $connecting == false ]]; then
     # RDP never appeared: the launch itself failed.

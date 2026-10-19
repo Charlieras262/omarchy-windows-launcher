@@ -53,10 +53,12 @@ case "\$1" in
       {address:"0xmain",  pid:\$pid, title:"Windows VM - Omarchy", workspace:{id:4}, size:\$sz, at:\$at, floating:\$fl, fullscreen:\$fs},
       {address:"0xpopup", pid:\$pid, title:"FreeRDP: dialog",      workspace:{id:1}, size:[300,200], at:[10,10], floating:true, fullscreen:0},
       {address:"0xother", pid:1,     title:"Terminal",              workspace:{id:1}, size:[1,1], at:[0,0], floating:false, fullscreen:0}]' ;;
+  activeworkspace) echo '{"id":1}' ;;
   dispatch) echo "dsp \$2" >> "$T/calls" ;;
 esac
 FAKE
   mkdir -p "$T/toggles"
+  printf 'o.window({ title = "Windows VM - Omarchy" }, { workspace = "4" })\n' > "$T/hypr.lua"
   cat >"$T/bin/bar" <<FAKE
 #!/bin/bash
 echo "bar \$*" >> "$T/calls"
@@ -68,7 +70,7 @@ FAKE
   export PATH="$T/realbin:$ORIG_PATH"
   export OWL_RUNTIME_DIR="$T/run" OWL_SHELL_CMD="$T/bin/omarchy-shell" OWL_VM_CMD="$T/bin/omarchy-windows-vm" \
          OWL_BAR_CMD="$T/bin/bar" OWL_NOTIFY_CMD="$T/bin/notify" OWL_REAL_PATH="$T/realbin:$PATH" \
-         OWL_TOGGLES_DIR="$T/toggles" OWL_HYPRCTL="$T/bin/hyprctl" OWL_WATCH=0.1 OWL_LAUNCH_CMD_FILE="$T/none" OWL_TICK=0.2 OWL_LSBLK_JSON="$ROOT/tests/fixtures/this-machine.json" OWL_PROTECTED_DISKS=""
+         OWL_HYPR_CONFIG="$T/hypr.lua" OWL_TOGGLES_DIR="$T/toggles" OWL_HYPRCTL="$T/bin/hyprctl" OWL_WATCH=0.1 OWL_LAUNCH_CMD_FILE="$T/none" OWL_TICK=0.2 OWL_LSBLK_JSON="$ROOT/tests/fixtures/this-machine.json" OWL_PROTECTED_DISKS=""
   unset FAKE_NO_SHELL FAKE_VM_FAIL FAKE_STOP_FAIL FAKE_VM_HOLD TEST_ANSWER
 }
 teardown() { rm -rf "$T"; }
@@ -109,7 +111,7 @@ teardown
 
 echo "all monitors"
 setup
-export TEST_ANSWER='{"action":"start","closeOnExit":true,"allMonitors":true,"disks":[]}'
+export FAKE_VM_HOLD=2.5 FAKE_STICK_AFTER=2 TEST_ANSWER='{"action":"start","closeOnExit":true,"allMonitors":true,"disks":[]}'
 assert_eq "exits 0" "0" "$(run)"
 assert_eq "RDP is told about all the monitors so the remote desktop is one canvas" "yes" "$(has '^rdp .*/multimon:force /f' && echo yes || echo no)"
 assert_eq "the bar flag is set while the session runs and cleared after (bar visible again)" "no" "$([[ -f $T/toggles/bar-off ]] && echo yes || echo no)"
@@ -143,6 +145,31 @@ assert_eq "single-monitor mode never floats or resizes the main window" "no" "$(
 assert_eq "popups still follow the main window in single-monitor mode" "yes" "$(has 'address:0xpopup' && echo yes || echo no)"
 teardown
 
+echo "bar timing and workspace"
+setup
+export FAKE_VM_HOLD=2.5 FAKE_STICK_AFTER=2 TEST_ANSWER='{"action":"start","closeOnExit":true,"allMonitors":true,"disks":[]}'
+assert_eq "exits 0" "0" "$(run)"
+line_of() { calls | grep -n -m1 -E -- "$1" | cut -d: -f1; }
+assert_eq "the bar is hidden only after the window was placed, never while booting" "yes" \
+  "$( (( $(line_of '^bar on') > $(line_of 'window.move\(\{ x = 0, y = 0') )) && echo yes || echo no)"
+assert_eq "the bar is hidden only once the window settled" "yes" "$(grep -q settled "$T/run/placement.log" && echo yes || echo no)"
+assert_eq "the dialog opens on the Windows workspace (focus moved to 4 first)" "yes" \
+  "$( (( $(line_of 'hl.dsp.focus\(\{ workspace = "4"') < $(line_of 'view":"dialog') )) && echo yes || echo no)"
+teardown
+
+setup
+export TEST_ANSWER='{"action":"cancel","closeOnExit":true,"allMonitors":true,"disks":[]}'
+assert_eq "cancel exits 0" "0" "$(run)"
+assert_eq "cancelling returns focus to the workspace you were on" "yes" "$(has 'hl.dsp.focus\(\{ workspace = "1"' && echo yes || echo no)"
+assert_eq "cancelling never hides the bar" "no" "$(has '^bar ' && echo yes || echo no)"
+teardown
+
+setup
+rm -f "$T/hypr.lua"
+export TEST_ANSWER='{"action":"cancel"}'
+assert_eq "without a user rule the focus is left alone" "no" "$( run >/dev/null; has 'hl.dsp.focus' && echo yes || echo no)"
+teardown
+
 echo "bar already hidden"
 setup
 touch "$T/toggles/bar-off"
@@ -157,7 +184,7 @@ setup
 export TEST_ANSWER='{"action":"start","closeOnExit":true,"allMonitors":true,"disks":[]}' FAKE_VM_FAIL=1
 assert_eq "failed launch exits non-zero" "1" "$(run)"
 assert_eq "state is failed with the reason" "failed|Failed to start Windows VM!" "$(jq -r '"\(.stage)|\(.error)"' "$T/run/state.json")"
-assert_eq "bar is restored after a failed launch" "bar on|bar off" "$(calls | grep '^bar ' | paste -sd'|')"
+assert_eq "a launch that fails before the window exists never touches the bar" "no" "$(has '^bar ' && echo yes || echo no)"
 assert_eq "a failed launch does not call stop" "no" "$(has '^vm stop' && echo yes || echo no)"
 teardown
 

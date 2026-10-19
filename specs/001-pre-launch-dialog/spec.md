@@ -67,7 +67,8 @@ asks me three things. I confirm with **Start** or abort with **Cancel**.
    the leftmost monitor and reaches the right edge of the rightmost one, aligned to the top,
    and covers the whole multi-monitor area (parts beyond a shorter monitor are simply outside
    the screens); the remote desktop sees every monitor (one canvas, not one monitor); and the
-   Omarchy bar is hidden so it does not overlap the VM.
+   Omarchy bar is hidden so it does not overlap the VM, but only **once Windows is loaded and its
+   window is displayed and in place** — never while it is still booting.
 2. *Given* the bar was hidden by this feature, *when* the Windows window closes (or the
    launch fails or is cancelled after the bar was hidden), *then* the bar is shown again.
 3. *Given* the bar was **already hidden** before I launched, *then* it is left hidden
@@ -168,6 +169,9 @@ before doing anything else.
   same workspace as the main Windows window, in every mode, not on whichever workspace is focused.
 - **FR-026** In all-monitors mode the main window MUST be floating and sized/positioned as in US3.1,
   and the remote desktop MUST follow the window size (dynamic resolution).
+- **FR-027** The dialog and progress windows MUST appear on the workspace (and therefore the monitor)
+  where the Windows window will open, as given by the user's own window rule; if the user cancels, focus
+  MUST return to where they were. Without such a rule, focus is left alone.
 - **FR-019** Option 2 on ⇒ the Omarchy bar is hidden (with the stock `omarchy toggle bar`
   command, whose `on` means "bar-off flag set", i.e. hidden) while the Windows window is open and restored afterwards, only if this feature
   was the one that hid it, on every exit path (normal close, failure, cancel, crash).

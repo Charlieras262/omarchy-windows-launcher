@@ -121,7 +121,7 @@ window when the geometry was applied only once. The watcher therefore re-asserts
 consecutive ticks, then stops so a manual resize afterwards is respected; every attempt is logged to
 `$XDG_RUNTIME_DIR/omarchy-windows-launcher/placement.log`. 
 
-Bar: before connecting, the orchestrator records whether the bar is currently hidden, then runs
+Bar: once the window has been placed and has held its geometry (the watcher drops a `window-settled` marker), never earlier, the orchestrator records whether the bar is currently hidden, then runs
 `omarchy toggle bar on` (**inverted wording**: the command drives a flag named `bar-off`, so `on` = flag present = bar hidden and `off` = bar shown; the first version had them swapped and hid the bar only after the session) (stock command; it sets the toggles flag and nudges the shell). `finalize` runs
 `omarchy toggle bar off` (shows it again) only if the orchestrator was the one that hid it, so a bar the user had already
 hidden stays hidden. It is restored on every exit path, including a failed launch after hiding. The
@@ -166,6 +166,12 @@ needing Docker access from the UI:
   (what the packaged `up_wait` already does) — coarse, three-step progress.
 - **Last resort**: TCP probe of `3389` after the container reports running.
 Progress never exposes credentials (NFR-003).
+
+### D10 — Overlays on the Windows workspace (FR-027)
+The dialog and progress windows are layer-shell surfaces: they have no workspace, they appear on whichever monitor is focused. To put
+them where Windows will open, the launcher reads the workspace from the user's own window rule for the title (`hyprland.lua`, never
+hard-coded; `OWL_WORKSPACE` overrides), remembers the active workspace, and focuses the target workspace with
+`hl.dsp.focus({ workspace })` before summoning the dialog; on cancel it focuses the remembered workspace again. With no rule it does nothing.
 
 ### D7 — Progress and shutdown windows (FR-011..013, US5)
 `Progress.qml` is one view with two modes (`launch`, `shutdown`), driven purely by `state.json`
