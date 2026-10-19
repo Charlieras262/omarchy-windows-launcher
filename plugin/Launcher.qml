@@ -21,6 +21,7 @@ Item {
 
   property var shell: null
   property var manifest: null
+  property alias diskSelect: diskSelect
 
   property bool opened: false
   property string view: "dialog"
@@ -258,10 +259,14 @@ Item {
           }
 
           MultiSelect {
+            id: diskSelect
             visible: root.view === "dialog" && root.mountDisks
             width: parent.width
             height: visible ? implicitHeight : 0
             label: "Disks"
+            // The popup floats over the Cancel/Start buttons; the theme's popup fill is
+            // translucent, which made the names unreadable. Same color, fully opaque.
+            background: Qt.rgba(root.background.r, root.background.g, root.background.b, 1)
             options: root.diskOptions
             values: root.selectedDisks
             emptyText: "No external disks found"
