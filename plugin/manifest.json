@@ -1,0 +1,15 @@
+{
+  "schemaVersion": 1,
+  "id": "charlieras262.windows-launcher",
+  "name": "Windows launcher",
+  "version": "0.1.0",
+  "author": "Charlieras262",
+  "description": "Pre-launch options dialog and launch/shutdown progress windows for the Omarchy Windows VM",
+  "kinds": [
+    "overlay"
+  ],
+  "keepLoaded": true,
+  "entryPoints": {
+    "overlay": "Launcher.qml"
+  }
+}
