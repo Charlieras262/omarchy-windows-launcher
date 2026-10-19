@@ -2,14 +2,14 @@
 
 Derived from `plan.md`. `[P]` = can run in parallel. Each task names the requirement it serves.
 Do not start Phase 1 until the Phase 0 spikes are recorded in `plan.md` and every
-`[NEEDS CLARIFICATION]` in `spec.md` is resolved.
+clarification in `spec.md` §7 is resolved (done as of this revision).
 
 ## Phase 0 — Spikes (answer unknowns; no production code)
 
 - [ ] **S1** Compare "own the flow" vs `--keep-alive` + `xfreerdp3` shim: confirm that the orchestrator can
       reproduce the packaged RDP arguments and bring the VM up without calling `__priv`. Record the choice (D2). — FR-003, FR-018
 - [ ] **S2** [P] Test `xfreerdp3 /multimon /monitors:…` together with `/dynamic-resolution` and the scale rules on this
-      machine's monitors; resolve spec clarification C4. — FR-004
+      machine's monitors; confirm the single spanning window. — FR-004
 - [ ] **S3** [P] With a throwaway USB stick, try attach approach A (compose override) and B (QEMU hot-plug via
       `/run/shm/monitor.sock`); verify read/write from Windows, clean release, and udiskie behaviour. Record the choice (D5). — FR-008..010
 - [ ] **S4** [P] Inspect `http://127.0.0.1:8006` for machine-readable boot status; if none, confirm the log-line
@@ -23,8 +23,9 @@ Do not start Phase 1 until the Phase 0 spikes are recorded in `plan.md` and ever
       spike dictates) and an empty view that loads. — FR-013
 - [ ] **T02** Define the `state.json` and `answers.json` schemas (documented in `plan.md` §4) and a bash library to
       read/write them atomically. — FR-011
-- [ ] **T03** [P] Implement `list-disks` (lsblk-based eligibility, D4) as a standalone function with unit tests using
-      recorded `lsblk -J` fixtures: USB stick listed; NVMe root, `/boot`, `/home`, swap, VM-storage disks excluded. — FR-005..007
+- [ ] **T03** [P] Implement `list-disks` ("every whole disk minus the system set", D4) as a standalone function with unit tests using
+      recorded `lsblk -J` fixtures: USB stick listed; a secondary data disk listed; NVMe root (including its LUKS/dm stack), `/boot`,
+      `/home`, swap, `zram` and VM-storage disks excluded. — FR-005..007
 - [ ] **T04** [P] Implement the session lock and the `finalize` trap skeleton (release → stop/report). — FR-014, FR-015
 - [ ] **T05** `install.sh` / `uninstall.sh` (idempotent): copy plugin and wrapper, re-point the desktop entry, install the root
       helper with `sudo`, and restore stock on uninstall. Test round trip leaves `git status`-style identical file trees. — FR-017, FR-018
@@ -48,6 +49,9 @@ Do not start Phase 1 until the Phase 0 spikes are recorded in `plan.md` and ever
 ## Phase 4 — All monitors (US3)
 
 - [ ] **T30** Orchestrator: build RDP monitor flags from `hyprctl monitors -j` per S2; single-monitor path unchanged. — FR-004
+- [ ] **T32** Hide the bar with `omarchy toggle bar off` when option 2 is on; record whether it was already hidden; restore with
+      `omarchy toggle bar on` in `finalize` on every exit path only if we hid it. Test: normal close, failed launch after hiding,
+      killed orchestrator, bar already hidden beforehand. — FR-019, US3.2, US3.3
 - [ ] **T31** Dialog: option 2 wired; test with 1 and N monitors. — US3
 
 ## Phase 5 — External disks (US4) — highest risk, last
@@ -58,7 +62,8 @@ Do not start Phase 1 until the Phase 0 spikes are recorded in `plan.md` and ever
 - [ ] **T42** Unmount flow with explicit user confirmation and "skip this disk" path; pause automount per disk. — FR-008, US4.5
 - [ ] **T43** Attach per the S3 decision; surface `preparing-disks` stage. — FR-009
 - [ ] **T44** Release on every exit path, including killed launcher and failed boot; verify disks return mountable on Linux. — FR-010, US4.6
-- [ ] **T45** Edge cases: disk unplugged during boot, VM already running with new disks (resolve C5). — spec §5
+- [ ] **T45** Edge cases: disk unplugged during boot; VM already running with selected disks → restart/continue prompt (no default,
+      Cancel aborts, warn that restarting loses unsaved Windows work). — spec §5
 - [ ] **T46** Security review checklist run on the helper before it is allowed in `install.sh` (no interpolated shell, no user-writable
       inputs read as root, paths canonicalized, argument allow-list). — Constitution III
 

@@ -1,8 +1,8 @@
 # Implementation Plan: Pre-launch dialog and launch/close progress
 
 **Spec**: `spec.md` · **Constitution**: `.specify/memory/constitution.md`
-**Status**: Draft — design decisions marked **(spike)** are provisional until the
-Phase 0 spikes in `tasks.md` confirm them.
+**Status**: Draft — spec clarifications C1–C5 are resolved; design decisions marked
+**(spike)** stay provisional until the Phase 0 spikes in `tasks.md` confirm them.
 
 ## 1. What the system looks like today (verified on this machine)
 
@@ -91,17 +91,28 @@ Fallback if copying the RDP argument list proves fragile across Omarchy updates:
 `omarchy-windows-vm launch --keep-alive` and run `down` from the orchestrator when option 1 is on,
 with a `PATH` shim for `xfreerdp3` to inject extra flags. Spike S1 decides which.
 
-### D3 — All monitors (FR-004, US3)
+### D3 — All monitors and bar hiding (FR-004, FR-019, US3)
 FreeRDP multi-monitor flags (`/multimon` with `/monitors:` built from `hyprctl monitors -j`; the
-current `/dynamic-resolution` must be compatible). Single-monitor path stays byte-for-byte what the
-packaged script does, including its scale logic. Spike S2 checks scaling with mixed-DPI monitors and
-settles clarification C4.
+current `/dynamic-resolution` must be compatible) give one window spanning every monitor. Single-monitor
+path stays byte-for-byte what the packaged script does, including its scale logic. Spike S2 checks scaling
+with mixed-DPI monitors.
+
+Bar: before connecting, the orchestrator records whether the bar is currently hidden, then runs
+`omarchy toggle bar off` (stock command; it sets the toggles flag and nudges the shell). `finalize` runs
+`omarchy toggle bar on` only if the orchestrator was the one that hid it, so a bar the user had already
+hidden stays hidden. It is restored on every exit path, including a failed launch after hiding. The
+state it needs ("we hid the bar") lives in the session state file so a restarted orchestrator can still
+restore it.
 
 ### D4 — Eligible disks (FR-005..007, US4)
 Computed by `lsblk -J -b -o NAME,PATH,TYPE,SIZE,MODEL,LABEL,FSTYPE,TRAN,RM,HOTPLUG,MOUNTPOINTS`
-as: whole disks (`TYPE=disk`) that are removable/USB (`RM=1` or `HOTPLUG=1` or `TRAN=usb`), minus any disk
-that has a partition mounted at `/`, `/boot`, `/home`, a swap, or under the VM's storage anchors, minus the
-disk backing the VM's data. Selection unit = whole disk (C2). The root helper **recomputes** this
+as: every whole disk (`TYPE=disk`, so removable USB media and secondary internal data disks alike) **minus**
+the system set: any disk with a partition mounted at `/`, `/boot`, `/home` or used as swap, any disk
+underlying the VM's storage anchors (`/var/lib/omarchy/windows/mounts/...`), any disk of a device-mapper /
+LUKS stack that holds those mounts (this machine's root is on `nvme0n1p2` → `root`), and `zram`/loop
+devices. Selection unit = whole disk (C2); the UI shows partitions only as descriptive text. The rule is
+"exclude the system", not "include only USB", so a data disk such as `/media/Data` is eligible while the
+root NVMe is not. The root helper **recomputes** this
 same set itself and rejects anything not in it, so a tampered `answers.json` cannot name `/dev/nvme0n1`.
 
 ### D5 — Attaching disks (FR-008..010) **(spike)**
@@ -111,7 +122,9 @@ Candidates, in order of preference:
   (root-owned, regenerated per session, deleted on release) adding `devices: [/dev/sdX]` and the
   image's per-disk environment variables, then runs
   `docker compose -f docker-compose.yml -f launcher.override.yml up -d`. Needs the container to be
-  recreated, so it only applies at a fresh start (edge case C5).
+  recreated, so it only applies at a fresh start. When the VM is already running, the orchestrator shows
+  the decided choice (spec §5): **Restart the VM with these disks** or **Continue without these disks**
+  (no default, Cancel aborts), rendered in the Progress view as a two-button prompt.
 - **B. QEMU hot-plug** through `/run/shm/monitor.sock` once the container runs. No recreation, but the
   device node must exist inside the container and the block backend must be added by hand.
 

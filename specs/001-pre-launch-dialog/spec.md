@@ -1,7 +1,7 @@
 # Feature Spec: Pre-launch dialog and launch/close progress for the Omarchy Windows VM
 
 **Feature ID**: 001-pre-launch-dialog
-**Status**: Draft — awaiting clarification of the items marked `[NEEDS CLARIFICATION]`
+**Status**: Clarified — all open questions resolved (see §7); ready for planning review
 **Constitution**: `.specify/memory/constitution.md`
 
 > This document says **what** the user gets and **why**. It contains no
@@ -63,11 +63,17 @@ asks me three things. I confirm with **Start** or abort with **Cancel**.
 **Acceptance scenarios**
 
 1. *Given* option 2 is **on** and I have N connected monitors, *when* the Windows
-   window opens, *then* it spans all N monitors.
-2. *Given* option 2 is **off**, *then* the window behaves exactly as it does today
-   (single monitor, today's scaling rules).
-3. *Given* only one monitor is connected, *when* option 2 is on, *then* the session
-   behaves as a normal single-monitor session and no error is shown.
+   window opens, *then* it is a single window that spans all N monitors, and the
+   Omarchy bar is hidden so it does not overlap the VM.
+2. *Given* the bar was hidden by this feature, *when* the Windows window closes (or the
+   launch fails or is cancelled after the bar was hidden), *then* the bar is shown again.
+3. *Given* the bar was **already hidden** before I launched, *then* it is left hidden
+   afterwards (this feature restores only what it changed).
+4. *Given* option 2 is **off**, *then* the window behaves exactly as it does today
+   (single monitor, today's scaling rules) and the bar is not touched.
+5. *Given* only one monitor is connected, *when* option 2 is on, *then* the session
+   behaves as a normal single-monitor session (bar still hidden, per scenario 1) and no
+   error is shown.
 
 ### US4 — Mount external disks (P2)
 
@@ -77,7 +83,9 @@ asks me three things. I confirm with **Start** or abort with **Cancel**.
    given to the VM.
 2. *Given* I turn option 3 **on**, *then* a multi-select field appears with the
    eligible disks; each entry shows enough to recognise it (name/model, label if any,
-   size, and its partitions).
+   size, and its partitions). Eligible means: removable volumes such as USB sticks, and
+   storage units that are not part of the Linux system (for example a secondary internal
+   data disk). The unit of selection is the **whole disk**.
 3. *Given* the list is open, *then* I can select zero, one or several disks. With
    zero selected, **Start** behaves as if option 3 were off.
 4. *Given* I selected disks and pressed **Start**, *when* Windows has booted, *then*
@@ -124,8 +132,11 @@ asks me three things. I confirm with **Start** or abort with **Cancel**.
   defaults, plus **Start** and **Cancel**.
 - **FR-003** Option 1 on ⇒ the VM is stopped after the Windows window closes; off ⇒
   it is left running.
-- **FR-004** Option 2 on ⇒ the Windows window uses every connected monitor; off ⇒
-  current single-monitor behaviour.
+- **FR-004** Option 2 on ⇒ the Windows window is one window spanning every connected
+  monitor; off ⇒ current single-monitor behaviour.
+- **FR-019** Option 2 on ⇒ the Omarchy bar is hidden (with the stock `omarchy toggle bar`
+  command) while the Windows window is open and restored afterwards, only if this feature
+  was the one that hid it, on every exit path (normal close, failure, cancel, crash).
 - **FR-005** Option 3 on ⇒ reveal a multi-select list of eligible disks; off ⇒ hide it
   and attach nothing.
 - **FR-006** The list MUST be built from the disks present at the moment the dialog
@@ -169,10 +180,11 @@ asks me three things. I confirm with **Start** or abort with **Cancel**.
 
 - The user has Docker without sudo (docker group): no authorization stage appears; the
   stage list adapts.
-- The VM is already running when Start is pressed with option 3 on and new disks
-  selected: disks cannot be added to a running VM safely — the dialog (or progress
-  window) must explain and offer to restart the VM or continue without those disks.
-  `[NEEDS CLARIFICATION: restart-the-VM vs continue-without — which is the default?]`
+- The VM is already running when Start is pressed with option 3 on and disks
+  selected: disks cannot be added to a running VM safely, so a message explains the
+  situation and asks the user to choose **Restart the VM with these disks** (anything
+  unsaved in Windows is lost, and the message says so) or **Continue without these
+  disks**. There is no default; **Cancel** aborts the launch with no changes.
 - A selected disk is unplugged while Windows is booting: report it, continue the launch
   without it, do not hang.
 - Windows never reports ready (2-minute limit today): progress window shows the timeout,
@@ -186,29 +198,27 @@ asks me three things. I confirm with **Start** or abort with **Cancel**.
 
 ## 6. Out of scope
 
-- Remembering last choices between sessions (see clarification C3).
+- Remembering last choices between sessions: the dialog always starts from the defaults (C3).
 - Creating or reconfiguring the VM (RAM, CPU, disk size) — stays in `omarchy windows vm install`.
 - USB device passthrough (keyboards, webcams, sticks as USB devices). Only block-disk
   attachment is covered here.
 - Snapshots, multiple VMs, non-Omarchy hosts.
 
-## 7. Open questions
+## 7. Resolved questions
 
-- **C1** `[NEEDS CLARIFICATION]` Which disks are "external"? Default proposed: removable /
-  USB-attached disks only. Should secondary *internal* disks (e.g. `/media/Data`,
-  `/media/Storage`) also be offered, perhaps behind a "show internal disks" switch?
-- **C2** `[NEEDS CLARIFICATION]` The unit of selection is a **whole disk** (Windows needs
-  the partition table to recognise volumes). The list shows partitions as descriptive
-  text only. Acceptable?
-- **C3** `[NEEDS CLARIFICATION]` Should the dialog remember the previous answers, or always
-  start from the stated defaults? Proposed: always defaults (as written in US1).
-- **C4** `[NEEDS CLARIFICATION]` "Use all monitors": one RDP window spanning all screens
-  (multi-monitor RDP), or the window fullscreen on a single chosen screen? Proposed: span all
-  connected monitors.
-- **C5** `[NEEDS CLARIFICATION]` See edge case "VM already running with new disks".
+- **C1 — Which disks are "external"?** Removable volumes (USB sticks and similar) plus storage
+  units that are not part of the Linux system. A disk holding `/`, `/boot`, `/home`, swap or the
+  VM's own storage is never eligible (FR-007).
+- **C2 — Selection unit.** Whole disk. Windows needs the partition table to recognise volumes;
+  partitions are shown as descriptive text only.
+- **C3 — Remembering choices.** No. The dialog always starts from the stated defaults.
+- **C4 — "All monitors".** One window spanning all connected monitors, with the Omarchy bar hidden
+  while it is open (FR-004, FR-019).
+- **C5 — VM already running with disks selected.** Explain the situation and let the user choose
+  restart-with-disks or continue-without; no default (see §5).
 
 ## 8. Acceptance checklist
 
 - [ ] Every user scenario above has an automated or scripted manual test in `tasks.md`.
-- [ ] No `[NEEDS CLARIFICATION]` marker remains.
+- [x] No `[NEEDS CLARIFICATION]` marker remains.
 - [ ] The constitution check in `plan.md` passes or documents each justified exception.
