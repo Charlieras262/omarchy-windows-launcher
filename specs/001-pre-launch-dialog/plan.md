@@ -157,15 +157,21 @@ Spike S3 tests both with a throwaway USB stick and decides. Either way: the host
 paused for the target disks during the session so it cannot remount them under the VM
 (this bit us during manual testing). Release re-enables it for those disks and lets the host re-detect them.
 
-### D6 — Progress source (FR-011, NFR-002) **(spike)**
-Stages up to "starting" come from the orchestrator itself. The "booting" stage needs a real signal without
-needing Docker access from the UI:
-- **Preferred**: the VM's own web endpoint on `127.0.0.1:8006` (the dockur status page shows install/boot
-  messages). Spike S4 checks whether it exposes machine-readable boot status.
-- **Fallback**: `docker logs` through the privileged helper, matching `Windows started successfully`
-  (what the packaged `up_wait` already does) — coarse, three-step progress.
-- **Last resort**: TCP probe of `3389` after the container reports running.
-Progress never exposes credentials (NFR-003).
+### D6 — Real boot progress (FR-011, NFR-002) — decided from the image's source, to be confirmed against a live boot
+Read from the source of `dockur/windows` and its base `qemus/qemu` (not guessed). Three signals, all readable by an unprivileged user:
+1. **Startup steps.** The container writes the current step to `/run/shm/msg.html` and serves it at `<web port>/msg.html` (its own web page polls it).
+   For an already-installed VM the order is fixed: *Starting Windows → Initializing disks → Configuring display drivers → Initializing network →
+   Configuring boot → Configuring QEMU*; downloads and conversions add a "(NN%)". When QEMU is up the file is deleted and the URL answers **404**.
+   The web port is protected with the VM's own credentials (`PROTECT: "Y"`), which the launcher already keeps in `~/.config/windows/credentials` (0600)
+   for RDP; they are given to curl on stdin (`--config -`), never on the command line, in a log or in the state file.
+2. **Windows booting inside QEMU** publishes nothing, so progress follows a curve (45% → 90%, fast then ever slower, never stalling and never finishing
+   on its own) from the moment the file disappears.
+3. **RDP handshake.** A real X.224 connection request on the RDP port; Docker maps the port even while the guest is down, so a bare connect proves nothing —
+   only a reply with a TPKT header (`03 00`) counts. It lifts the bar to 95%; the RDP window itself then ends it (100%).
+If the web endpoint cannot be read for a while (no credentials, port changed) the curve alone keeps the bar moving. Every change is logged without
+credentials to `$XDG_RUNTIME_DIR/omarchy-windows-launcher/boot-probe.log` so a bad mapping can be diagnosed. Stage weights were lowered
+(`booting` = 8%) so these real values take over instead of being masked. The progress window shows only a title and a bar, so the message text
+is used for the bar and the log, not displayed.
 
 ### D12 — Progress windows wait for the authorization prompt (FR-029)
 The packaged command elevates with `pkexec`, which waits for the polkit agent and only starts its child once the user has authorized.

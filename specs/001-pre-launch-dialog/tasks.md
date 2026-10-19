@@ -10,6 +10,7 @@ wrapper honored), install/uninstall.
 `omarchy-windows-vm launch --keep-alive` (or the user's own wrapper, recorded by `install.sh`), detect the RDP window
 with a PATH shim for `xfreerdp3`, and stop with `omarchy-windows-vm stop`. No private `__priv` internals are used and no
 root code exists yet.
+**Real boot progress (S4/T21) is implemented from the image's source and unit/integration-tested with fakes; it still has to be confirmed against a live boot (`boot-probe.log`).**
 **Not yet validated live:** the full flow against the real VM and the real shell (needs `./install.sh` and a launch).
 **Not started:** external disks (Phase 5, needs the root helper), clean release and reconcile (D9), real boot-progress
 signal (S4, needs a running VM), S1/S2/S3/S4/S6 spikes against the real VM.
@@ -26,7 +27,7 @@ clarification in `spec.md` §7 is resolved (done as of this revision).
       window: dynamic resolution follows the size, mixed-DPI). Replaces the FreeRDP `/multimon` approach. — FR-004, FR-026
 - [ ] **S3** [P] With a throwaway USB stick, try attach approach A (compose override) and B (QEMU hot-plug via
       `/run/shm/monitor.sock`); verify read/write from Windows, clean release, and udiskie behaviour. Record the choice (D5). — FR-008..010
-- [ ] **S4** [P] Inspect `http://127.0.0.1:8006` for machine-readable boot status; if none, confirm the log-line
+- [x] **S4** [P] Inspect `http://127.0.0.1:8006` for machine-readable boot status; if none, confirm the log-line
       fallback. Record the choice (D6). — FR-011, NFR-002
 - [x] **S5** [P] Confirm the shell can summon a user overlay plugin with a JSON payload and read back a file result;
       measure dialog latency. — NFR-001, FR-001

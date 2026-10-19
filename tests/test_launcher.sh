@@ -28,6 +28,7 @@ case "\$1" in
     echo "Starting Windows VM..."
     elevate || { echo "Failed to start Windows VM!"; exit 1; }
     [[ -n \${FAKE_VM_FAIL:-} ]] && { echo "Failed to start Windows VM!"; exit 1; }
+    sleep "\${FAKE_BOOT_DELAY:-0}"
     sleep 0.5
     xfreerdp3 /u:x /v:127.0.0.1
     sleep "\${FAKE_VM_HOLD:-0}"
@@ -87,8 +88,8 @@ FAKE
   export PATH="$T/realbin:$ORIG_PATH"
   export OWL_RUNTIME_DIR="$T/run" OWL_SHELL_CMD="$T/bin/omarchy-shell" OWL_VM_CMD="$T/bin/omarchy-windows-vm" \
          OWL_BAR_CMD="$T/bin/bar" OWL_NOTIFY_CMD="$T/bin/notify" OWL_REAL_PATH="$T/realbin:$PATH" \
-         OWL_HYPR_CONFIG="$T/hypr.lua" OWL_TOGGLES_DIR="$T/toggles" OWL_HYPRCTL="$T/bin/hyprctl" OWL_AUTH_GRACE_TICKS=5 OWL_BAR_POLL=0.05 OWL_WATCH=0.1 OWL_LAUNCH_CMD_FILE="$T/none" OWL_TICK=0.2 OWL_LSBLK_JSON="$ROOT/tests/fixtures/this-machine.json" OWL_PROTECTED_DISKS=""
-  unset FAKE_AUTH_DELAY FAKE_AUTH_DECLINE FAKE_NO_SHELL FAKE_VM_FAIL FAKE_STOP_FAIL FAKE_VM_HOLD TEST_ANSWER
+         OWL_HYPR_CONFIG="$T/hypr.lua" OWL_TOGGLES_DIR="$T/toggles" OWL_HYPRCTL="$T/bin/hyprctl" OWL_WEB_BASE=http://127.0.0.1:1 OWL_RDP_PORT=1 OWL_CREDENTIALS_FILE="$T/none" OWL_FALLBACK_AFTER=1 OWL_AUTH_GRACE_TICKS=5 OWL_BAR_POLL=0.05 OWL_WATCH=0.1 OWL_LAUNCH_CMD_FILE="$T/none" OWL_TICK=0.2 OWL_LSBLK_JSON="$ROOT/tests/fixtures/this-machine.json" OWL_PROTECTED_DISKS=""
+  unset FAKE_BOOT_DELAY FAKE_AUTH_DELAY FAKE_AUTH_DECLINE FAKE_NO_SHELL FAKE_VM_FAIL FAKE_STOP_FAIL FAKE_VM_HOLD TEST_ANSWER
 }
 teardown() { rm -rf "$T"; }
 calls() { cat "$T/calls"; }
@@ -186,6 +187,26 @@ rm -f "$T/hypr.lua"
 export TEST_ANSWER='{"action":"cancel"}'
 assert_eq "without a user rule the focus is left alone" "no" "$( run >/dev/null; has 'hl.dsp.focus' && echo yes || echo no)"
 teardown
+
+echo "real boot progress"
+if command -v python3 >/dev/null; then
+  setup
+  PORT=$((RANDOM % 2000 + 45000)); W="$T/web"; mkdir -p "$W"
+  printf '<p class="loading">Initializing network</p>' > "$W/msg.html"
+  python3 -I -m http.server "$PORT" --bind 127.0.0.1 --directory "$W" >/dev/null 2>&1 &
+  srv=$!; sleep 0.8
+  export OWL_WEB_BASE="http://127.0.0.1:$PORT" OWL_TICK=0.15 FAKE_BOOT_DELAY=1.6 \
+         TEST_ANSWER='{"action":"start","closeOnExit":false,"allMonitors":false,"disks":[]}'
+  assert_eq "exits 0" "0" "$(run)"
+  kill "$srv" 2>/dev/null; wait "$srv" 2>/dev/null
+  assert_eq "the container's startup step is read from the web endpoint" "yes" "$(grep -q 'msg=Initializing network' "$T/run/boot-probe.log" && echo yes || echo no)"
+  assert_eq "...and mapped to its place on the bar (26%)" "yes" "$(grep -q 'pct=26 ' "$T/run/boot-probe.log" && echo yes || echo no)"
+  assert_eq "the probe log never contains credentials" "no" "$(grep -qiE 'pass|secret' "$T/run/boot-probe.log" && echo yes || echo no)"
+  assert_eq "the run still ends at running 100%" "running 100" "$(jq -r '"\(.stage) \(.percent)"' "$T/run/state.json")"
+  teardown
+else
+  echo "  skip (python3 not found)"
+fi
 
 echo "progress windows wait for the authorization prompt"
 setup

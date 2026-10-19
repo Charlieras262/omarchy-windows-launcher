@@ -38,6 +38,8 @@ source "$OWL_ROOT/lib/state.sh"
 source "$OWL_ROOT/lib/disks.sh"
 # shellcheck source=lib/layout.sh
 source "$OWL_ROOT/lib/layout.sh"
+# shellcheck source=lib/boot.sh
+source "$OWL_ROOT/lib/boot.sh"
 
 log() { printf 'omarchy-windows-launcher: %s\n' "$*" >&2; }
 
@@ -294,14 +296,43 @@ stop_watcher() {
 
 # ----------------------------------------------------------------- progress ticker
 
-# While Windows boots we have no machine-readable signal yet (spike S4), so
-# creep the bar forward honestly and say we are waiting.
+# Real boot progress (lib/boot.sh): the container's startup steps, then a curve while Windows
+# boots with nothing to read, then an RDP handshake. If the web endpoint cannot be read for a long
+# time (no credentials, wrong port, ...) the curve alone keeps the bar moving. Every change is logged,
+# without credentials, to $OWL_RUNTIME_DIR/boot-probe.log so a bad mapping can be diagnosed.
 start_ticker() {
   (
-    local p=40
-    while sleep "${OWL_TICK:-2}"; do
-      ((p < 88)) && p=$((p + 1))
-      owl_state_progress "$p"
+    local t0=$SECONDS guest_t0="" pct=8 state text g msg="" last="" rdp
+    while sleep "${OWL_TICK:-1}"; do
+      read -r state text <<<"$(owl_boot_message)"
+      case "$state" in
+      ok)
+        g=$(owl_boot_percent_for_message "$text")
+        [[ -n $g ]] && ((g > pct)) && pct=$g
+        msg=$text
+        ;;
+      gone)
+        [[ -z $guest_t0 ]] && guest_t0=$SECONDS
+        g=$(owl_boot_guest_percent $((SECONDS - guest_t0)))
+        ((g > pct)) && pct=$g
+        ;;
+      *)
+        if ((SECONDS - t0 > ${OWL_FALLBACK_AFTER:-25})); then
+          g=$(owl_boot_guest_percent $((SECONDS - t0 - ${OWL_FALLBACK_AFTER:-25})))
+          ((g > pct)) && pct=$g
+        fi
+        ;;
+      esac
+      rdp=0
+      if owl_probe_rdp; then
+        rdp=1
+        pct=95
+      fi
+      owl_state_progress "$pct" "$msg"
+      if [[ $last != "$state|$rdp|$pct|$msg" ]]; then
+        last="$state|$rdp|$pct|$msg"
+        printf '%s state=%s rdp=%s pct=%s msg=%s\n' "$(date +%T)" "$state" "$rdp" "$pct" "$msg" >>"$OWL_RUNTIME_DIR/boot-probe.log"
+      fi
     done
   ) &
   ticker_pid=$!
@@ -384,7 +415,7 @@ main() {
     owl_state_stage failed "Could not start" "xfreerdp3 was not found"
     exit 1
   }
-  rm -f -- "$OWL_RUNTIME_DIR/rdp-started" "$OWL_RUNTIME_DIR/window-settled"
+  rm -f -- "$OWL_RUNTIME_DIR/rdp-started" "$OWL_RUNTIME_DIR/window-settled" "$OWL_RUNTIME_DIR/boot-probe.log"
 
   # Bring the VM up and connect. --keep-alive: the stop decision is ours.
   local out="$OWL_RUNTIME_DIR/vm.log"

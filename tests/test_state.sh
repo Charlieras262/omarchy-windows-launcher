@@ -15,7 +15,7 @@ assert_eq "runtime dir is private" "700" "$(stat -c %a "$OWL_RUNTIME_DIR")"
 owl_state_stage authorizing "Waiting for authorization…"
 owl_state_stage starting "Starting the VM…"
 assert_eq "stage and message are recorded" "starting|Starting the VM…" "$(owl_state_get stage)|$(owl_state_get message)"
-assert_eq "percent follows the stage" "35" "$(owl_state_get percent)"
+assert_eq "percent follows the stage" "6" "$(owl_state_get percent)"
 
 owl_state_progress 70 "Booting Windows…"
 assert_eq "progress refines inside a stage" "70" "$(owl_state_get percent)"
@@ -32,7 +32,7 @@ owl_state_init
 owl_state_stage starting "Starting…"
 owl_state_stage failed "Could not start" "Docker is not running"
 assert_eq "failure keeps the last percent so the bar shows where it stopped" \
-  "failed 35 Docker is not running" "$(owl_state_get stage) $(owl_state_get percent) $(owl_state_get error)"
+  "failed 6 Docker is not running" "$(owl_state_get stage) $(owl_state_get percent) $(owl_state_get error)"
 
 owl_state_init
 owl_state_stage running "ready"

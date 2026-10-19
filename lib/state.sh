@@ -7,11 +7,12 @@
 
 OWL_RUNTIME_DIR="${OWL_RUNTIME_DIR:-${XDG_RUNTIME_DIR:-/tmp}/omarchy-windows-launcher}"
 
-# Launch stages and the overall percentage each one starts at. "booting" may be
-# refined between its start and the next stage's start with owl_state_progress.
+# Launch stages and the overall percentage each one starts at. "booting" is refined
+# between its start and the next stage's start with owl_state_progress.
 declare -A OWL_STAGE_PERCENT=(
-  [idle]=0 [dialog]=0 [authorizing]=8 [preparing-disks]=20 [starting]=35
-  [booting]=55 [connecting]=92 [running]=100
+  [idle]=0 [dialog]=0 [authorizing]=3 [preparing-disks]=5 [starting]=6
+  # "booting" starts low on purpose: the real progress (lib/boot.sh) takes over from here.
+  [booting]=8 [connecting]=96 [running]=100
   # shutdown mode
   [closing]=10 [stopping]=35 [releasing]=75 [stopped]=100
   # terminal
