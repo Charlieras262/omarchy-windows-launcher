@@ -91,11 +91,22 @@ Fallback if copying the RDP argument list proves fragile across Omarchy updates:
 `omarchy-windows-vm launch --keep-alive` and run `down` from the orchestrator when option 1 is on,
 with a `PATH` shim for `xfreerdp3` to inject extra flags. Spike S1 decides which.
 
-### D3 — All monitors and bar hiding (FR-004, FR-019, US3)
-FreeRDP multi-monitor flags (`/multimon` with `/monitors:` built from `hyprctl monitors -j`; the
-current `/dynamic-resolution` must be compatible) give one window spanning every monitor. Single-monitor
-path stays byte-for-byte what the packaged script does, including its scale logic. Spike S2 checks scaling
-with mixed-DPI monitors.
+### D3 — All monitors, window placement and bar hiding (FR-004, FR-019, FR-024..026, US3)
+**Decision (supersedes the FreeRDP `/multimon` idea):** FreeRDP multi-monitor is not used. The main window is
+made floating and stretched over every monitor with Hyprland itself, because a floating window may straddle outputs
+and the packaged launcher already passes `/dynamic-resolution`, so the remote desktop follows the window size.
+`lib/layout.sh` computes the box from `hyprctl monitors -j`: left edge of the leftmost monitor to the right edge of the
+rightmost, top-aligned, height of the shortest monitor, in logical pixels (scale applied, rotated outputs swapped; on this
+machine: portrait DP-1 + ultrawide DP-2 → `0 0 4880 1440`). Placement uses the Lua dispatchers of this Hyprland (0.56):
+`hl.dsp.window.float/resize/move` with `window = "address:…"`, verified on a throwaway window. Single-monitor path is untouched.
+
+Window identity and rules: the shim records the RDP client's PID; the launcher finds its windows by PID, not by class (the
+class is only knowable once a real session is open). The user's own rule by title (`o.window({ title = "Windows VM - Omarchy" },
+{ workspace = "4" })`) keeps working because neither title nor workspace of the main window is touched. A watcher runs for the
+whole session and moves every other window of that PID (popups, dialogs) to the main window's workspace with
+`hl.dsp.window.move({ workspace, follow = false })`. Window rules cannot express "same workspace as another window", hence the
+watcher. The launcher's own overlay windows (dialog, progress) are layer-shell surfaces and are not tied to a workspace.
+Spike S2 still checks mixed-DPI behaviour live.
 
 Bar: before connecting, the orchestrator records whether the bar is currently hidden, then runs
 `omarchy toggle bar off` (stock command; it sets the toggles flag and nudges the shell). `finalize` runs

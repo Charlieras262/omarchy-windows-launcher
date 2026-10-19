@@ -63,8 +63,11 @@ asks me three things. I confirm with **Start** or abort with **Cancel**.
 **Acceptance scenarios**
 
 1. *Given* option 2 is **on** and I have N connected monitors, *when* the Windows
-   window opens, *then* it is a single window that spans all N monitors, and the
-   Omarchy bar is hidden so it does not overlap the VM.
+   window opens, *then* it is a single **floating** window that starts at the left edge of
+   the leftmost monitor and reaches the right edge of the rightmost one, aligned to the top
+   (so its top-right corner is the top-right corner of the rightmost monitor), as tall as the
+   shortest monitor so no part hangs off a screen; and the Omarchy bar is hidden so it does
+   not overlap the VM.
 2. *Given* the bar was hidden by this feature, *when* the Windows window closes (or the
    launch fails or is cancelled after the bar was hidden), *then* the bar is shown again.
 3. *Given* the bar was **already hidden** before I launched, *then* it is left hidden
@@ -158,6 +161,13 @@ before doing anything else.
   it is left running.
 - **FR-004** Option 2 on ⇒ the Windows window is one window spanning every connected
   monitor; off ⇒ current single-monitor behaviour.
+- **FR-024** The user's own Hyprland window rules for the Windows window (for example the one that
+  sends it to workspace 4) MUST keep applying. The launcher never renames the window, never forces its
+  workspace, and only changes its geometry in all-monitors mode.
+- **FR-025** Every other window opened by the RDP client (popups, dialogs) MUST be kept on the
+  same workspace as the main Windows window, in every mode, not on whichever workspace is focused.
+- **FR-026** In all-monitors mode the main window MUST be floating and sized/positioned as in US3.1,
+  and the remote desktop MUST follow the window size (dynamic resolution).
 - **FR-019** Option 2 on ⇒ the Omarchy bar is hidden (with the stock `omarchy toggle bar`
   command) while the Windows window is open and restored afterwards, only if this feature
   was the one that hid it, on every exit path (normal close, failure, cancel, crash).

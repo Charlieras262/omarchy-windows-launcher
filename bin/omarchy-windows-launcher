@@ -20,7 +20,11 @@ OWL_VM_CMD=${OWL_VM_CMD:-omarchy-windows-vm}
 OWL_SHELL_CMD=${OWL_SHELL_CMD:-omarchy-shell}
 OWL_NOTIFY_CMD=${OWL_NOTIFY_CMD:-omarchy-notification-send}
 OWL_BAR_CMD=${OWL_BAR_CMD:-omarchy-toggle-bar}
-OWL_RDP_EXTRA=${OWL_RDP_EXTRA:-/multimon:force /f}
+# Extra FreeRDP flags appended by the shim. Empty by default: "all monitors" is done
+# by floating and stretching the window (lib/layout.sh), not by FreeRDP multi-monitor.
+OWL_RDP_EXTRA=${OWL_RDP_EXTRA:-}
+OWL_HYPRCTL=${OWL_HYPRCTL:-hyprctl}
+OWL_WINDOW_TITLE=${OWL_WINDOW_TITLE:-Windows VM - Omarchy}
 # install.sh records the command the user's own desktop entry used to launch the
 # VM (for example a personal wrapper that fixes permissions or audio) so we keep
 # honoring it instead of silently bypassing it.
@@ -30,12 +34,15 @@ OWL_LAUNCH_CMD_FILE=${OWL_LAUNCH_CMD_FILE:-$HOME/.local/share/omarchy-windows-la
 source "$OWL_ROOT/lib/state.sh"
 # shellcheck source=lib/disks.sh
 source "$OWL_ROOT/lib/disks.sh"
+# shellcheck source=lib/layout.sh
+source "$OWL_ROOT/lib/layout.sh"
 
 log() { printf 'omarchy-windows-launcher: %s\n' "$*" >&2; }
 
 hid_bar=false
 vm_pid=""
 ticker_pid=""
+watcher_pid=""
 
 # ----------------------------------------------------------------- shell UI
 
@@ -95,11 +102,71 @@ make_shim() {
   mkdir -p -- "$dir"
   cat >"$dir/xfreerdp3" <<SHIM
 #!/bin/bash
-: > "$OWL_RUNTIME_DIR/rdp-started"
+echo \$\$ > "$OWL_RUNTIME_DIR/rdp-started"
 exec "$real" "\$@" $extra
 SHIM
   chmod 0755 "$dir/xfreerdp3"
   printf '%s' "$dir"
+}
+
+# ----------------------------------------------------------------- window placement
+
+dsp() { "$OWL_HYPRCTL" dispatch "$1" >/dev/null 2>&1; }
+
+# Windows of the RDP client process: "address workspace title" per line.
+rdp_windows() {
+  local pid
+  pid=$(cat "$OWL_RUNTIME_DIR/rdp-started" 2>/dev/null) || return 0
+  [[ $pid =~ ^[0-9]+$ ]] || return 0
+  "$OWL_HYPRCTL" clients -j 2>/dev/null |
+    jq -r --argjson pid "$pid" '.[] | select(.pid == $pid) | "\(.address) \(.workspace.id) \(.title)"'
+}
+
+# Float the main window and stretch it over every monitor, top-aligned
+# (the user's workspace rule for the window keeps applying; we only change geometry).
+place_window() {
+  local addr="$1" geo x y w h
+  geo=$("$OWL_HYPRCTL" monitors -j 2>/dev/null | owl_span_geometry) || return 1
+  read -r x y w h <<<"$geo"
+  [[ -n ${h:-} ]] || return 1
+  dsp "hl.dsp.window.float({ action = \"enable\", window = \"address:$addr\" })"
+  dsp "hl.dsp.window.resize({ x = $w, y = $h, window = \"address:$addr\" })"
+  dsp "hl.dsp.window.move({ x = $x, y = $y, window = \"address:$addr\" })"
+}
+
+# Runs for the whole session: places the main window once (all-monitors mode) and
+# keeps every other window of the RDP client (popups, dialogs) on the main window's
+# workspace, so they never land on whatever workspace happens to be focused.
+watch_windows() {
+  local all_monitors="$1" placed=false main_ws="" addr ws title
+  while sleep "${OWL_WATCH:-0.5}"; do
+    main_ws=""
+    local lines
+    lines=$(rdp_windows)
+    [[ -n $lines ]] || continue
+    while read -r addr ws title; do
+      if [[ $title == "$OWL_WINDOW_TITLE" ]]; then
+        main_ws=$ws
+        if [[ $all_monitors == true && $placed == false ]]; then
+          place_window "$addr" && placed=true
+        fi
+      fi
+    done <<<"$lines"
+    [[ -n $main_ws ]] || continue
+    while read -r addr ws title; do
+      [[ $title == "$OWL_WINDOW_TITLE" || $ws == "$main_ws" ]] && continue
+      dsp "hl.dsp.window.move({ workspace = \"$main_ws\", follow = false, window = \"address:$addr\" })"
+    done <<<"$lines"
+  done
+}
+
+start_watcher() { watch_windows "$1" & watcher_pid=$!; }
+
+stop_watcher() {
+  [[ -n $watcher_pid ]] || return 0
+  kill "$watcher_pid" 2>/dev/null
+  wait "$watcher_pid" 2>/dev/null
+  watcher_pid=""
 }
 
 # ----------------------------------------------------------------- progress ticker
@@ -129,6 +196,7 @@ stop_ticker() {
 finalize() {
   trap - EXIT INT TERM HUP
   stop_ticker
+  stop_watcher
   [[ -n $vm_pid ]] && kill "$vm_pid" 2>/dev/null
   restore_bar
   owl_lock_release
@@ -199,6 +267,7 @@ main() {
   fi
   PATH="$shim:$PATH" "${launch_cmd[@]}" --keep-alive >"$out" 2>&1 &
   vm_pid=$!
+  start_watcher "$all_monitors"
 
   owl_state_stage booting "Waiting for Windows to boot…"
   start_ticker
@@ -219,6 +288,7 @@ main() {
   local rc=$?
   vm_pid=""
   stop_ticker
+  stop_watcher
   # The window may have opened and closed between two polls.
   mark_running
 
