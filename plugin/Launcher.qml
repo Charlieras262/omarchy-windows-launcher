@@ -56,6 +56,11 @@ Item {
   readonly property bool terminal: vm.stage === "failed" || vm.stage === "running" || vm.stage === "stopped" || vm.stage === "cancelled"
   readonly property bool failed: vm.stage === "failed"
 
+  // The disk list is anchored to its trigger; if the trigger goes away (switch turned off, dialog
+  // reopened) while the list is open, it loses its anchor, jumps to the top of the window and keeps
+  // the card stretched. Close it whenever the switch goes off.
+  onMountDisksChanged: { if (!mountDisks) diskSelect.close() }
+
   // ---------------------------------------------------------------- entry points
 
   function open(payloadJson) {
@@ -63,6 +68,7 @@ Item {
     try { payload = JSON.parse(payloadJson || "{}") } catch (e) { payload = ({}) }
     if (payload.fontFamily) root.fontFamily = payload.fontFamily
 
+    diskSelect.close()
     root.view = payload.view === "progress" ? "progress" : "dialog"
 
     if (root.view === "dialog") {
@@ -324,7 +330,7 @@ Item {
           Item {
             visible: root.view === "dialog"
             width: parent.width
-            height: diskSelect.popupOpen ? root.diskListHeight : 0
+            height: (diskSelect.popupOpen && root.mountDisks) ? root.diskListHeight : 0
             Behavior on height { NumberAnimation { duration: 120 } }
           }
 
