@@ -71,8 +71,8 @@ closing → stopped`, plus terminal `failed` and `cancelled`.
 - `percent` is derived from stage weights, not time, and never decreases.
 - The orchestrator holds a lock (`flock` on a file in the runtime dir) so a second launch only
   re-summons the existing Progress view (FR-015).
-- Every exit path (including `trap` on signals) runs one `finalize` function: release disks, then
-  stop or report the VM per option 1 (FR-010, FR-014).
+- Every exit path (including `trap` on signals) runs one `finalize` function. Disk-bearing sessions
+  follow the ordered release of D9 (FR-020); the VM is stopped or reported per option 1 (FR-010, FR-014).
 
 ## 5. Key design decisions
 
@@ -154,6 +154,41 @@ sudoless Docker, the helper is skipped for the VM-only path and the stage list o
 The helper's entire interface is a closed verb set: `up [--disk PATH]… `, `down`, `release`, with
 argument validation modelled on the packaged `valid_*` checks. It is not a general docker wrapper.
 
+### D9 — Clean release and shutdown/reboot ordering (FR-020..023, US6)
+
+Two layers, because neither alone is enough: the first prevents trouble on the normal paths, the
+second guarantees recovery when the first is cut short.
+
+**Layer 1 — ordered release at close.** `finalize` for a session with disks runs, in order:
+`graceful guest stop` (the image already turns a container SIGTERM into a Windows shutdown and the
+compose allows `stop_grace_period: 2m`) → wait for the container to be `exited` → helper `release`
+(detach, return disk to the host, lift the per-disk automount pause) → restore bar. The helper never
+releases while the container is running.
+
+**Priority over host shutdown/reboot.** The orchestrator holds a systemd *delay* inhibitor
+(`systemd-inhibit --what=shutdown --mode=delay`, no extra package) for as long as any disk is attached
+and starts the guest shutdown as soon as it receives the termination signal or the logind
+`PrepareForShutdown` signal. Facts on this machine: Omarchy's `omarchy system shutdown` schedules
+`systemctl poweroff` two seconds out while closing all windows (which closes the RDP window and
+triggers `finalize` concurrently), and logind is configured with `InhibitDelayMaxSec=15`
+(`/etc/systemd/logind.conf.d/20-inhibit-delay.conf`). So the hold is limited to about 15 seconds by
+system policy; a Windows shutdown can take longer. We do **not** raise that limit (it is a system file;
+Constitution II). Spike S6 measures the real shutdown time. If Docker's own stop at host poweroff
+already waits for the container (to be confirmed in S6), Layer 1 is covered by it and the inhibitor
+is a bonus; otherwise Layer 2 carries the guarantee.
+
+**Layer 2 — reconcile at start (FR-022).** Before any launch work, `reconcile` reads the previous
+session's state file and compares it with reality (`docker inspect`, `lsblk`, automount pause list,
+bar toggle). It repairs: container still up → graceful stop first; disks still listed as attached while
+the container is down → release; automount still paused → lift; bar hidden by us → restore. It marks
+disks with `unclean=true` when the previous session ended without a confirmed guest stop, shows that in
+the Progress view (FR-023), and refuses to mount them on the host automatically. Because it runs on
+every launch, correctness no longer depends on winning a race with the shutdown order.
+
+**Why not "only at start"?** It would leave disks attached through a whole reboot with no guest
+shutdown, risking NTFS corruption. **Why not "only at close"?** The host may power off before it finishes.
+Layer 1 minimises risk; Layer 2 removes the dependency on timing.
+
 ## 6. Repository layout
 
 ```
@@ -175,6 +210,7 @@ README.md  LICENSE (GPL-3.0)
 | Packaged `omarchy-windows-vm` internals change (`__priv` actions, RDP args) | Wrapper breaks after update | Prefer own helper over undocumented `__priv`; tests that diff our RDP args against the packaged script; version check at start. |
 | Wrong disk attached (data loss) | Severe | Closed-set recompute in root helper; system-disk exclusion with tests; explicit unmount confirmation; never auto-select. |
 | Shell plugin API shifts | UI stops loading | Use only documented kinds/components; pin `schemaVersion`; degrade to stock launcher with a message. |
+| Host shuts down before the guest finishes (inhibitor limited to ~15 s by logind) | Disk left dirty | Guest shutdown starts at once; Docker's own graceful stop; reconcile-at-start (D9 layer 2); dirty report instead of silent repair. |
 | Automount (udiskie) races with attach | Disk busy / mounted twice | Pause automount per disk for the session (D5). |
 | Root helper becomes an escalation path | Severe | Root-owned install path, closed verbs, no shell-outs with interpolated input, review checklist in `tasks.md`. |
 | The manual changes made earlier (privileged container, `/dev/bus/usb` volume, `usb-host` ARGUMENTS) conflict with the override | Confusing state | Document and offer a one-step revert (backup `docker-compose.yml.bak` / `.bak2` already exist). |
@@ -190,5 +226,7 @@ README.md  LICENSE (GPL-3.0)
 | FR-008,009,010 | D5, §4 finalize |
 | FR-011,012,013 | D6, D7 |
 | FR-014,015,016 | §4, D8 |
+| FR-020,021 | D9 layer 1 |
+| FR-022,023 | D9 layer 2 |
 | FR-017,018 | §3 install/uninstall, constitution II |
 | NFR-001..005 | D1, D6, D7; strings in one file |

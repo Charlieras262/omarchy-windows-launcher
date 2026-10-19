@@ -17,6 +17,10 @@ clarification in `spec.md` §7 is resolved (done as of this revision).
 - [ ] **S5** [P] Confirm the shell can summon a user overlay plugin with a JSON payload and read back a file result;
       measure dialog latency. — NFR-001, FR-001
 
+- [ ] **S6** [P] Measure how long this Windows VM takes to shut down; test what happens to the container when the host
+      powers off with it running (does Docker's stop wait the full grace period? is the 15 s logind delay enough?); confirm a
+      delay inhibitor can be held from a user process and released on completion. Record results in D9. — FR-020, FR-021
+
 ## Phase 1 — Foundations
 
 - [ ] **T01** Create `plugin/manifest.json` (id `charlieras262.windows-launcher`, kind `overlay`, `keepLoaded` as the
@@ -64,6 +68,15 @@ clarification in `spec.md` §7 is resolved (done as of this revision).
 - [ ] **T44** Release on every exit path, including killed launcher and failed boot; verify disks return mountable on Linux. — FR-010, US4.6
 - [ ] **T45** Edge cases: disk unplugged during boot; VM already running with selected disks → restart/continue prompt (no default,
       Cancel aborts, warn that restarting loses unsaved Windows work). — spec §5
+- [ ] **T47** Ordered release in `finalize`: graceful guest stop → wait for container exited → helper `release` → restore automount;
+      the helper refuses `release` while the container is running (test). — FR-020
+- [ ] **T48** Shutdown/reboot priority: hold a delay inhibitor while disks are attached; start the guest shutdown on SIGTERM and on
+      `PrepareForShutdown`; verify with `omarchy system shutdown` and `omarchy system reboot` while a disk is attached. — FR-021, US6.2
+- [ ] **T49** `reconcile` at the start of every launch: detect and repair leftover container, attached disks, paused automount and
+      hidden bar; report in the Progress view; refuse to continue if it cannot reconcile. Tests: kill the orchestrator mid-session,
+      kill the container, simulate a reboot with a stale state file. — FR-022
+- [ ] **T4A** Dirty-disk reporting: mark `unclean` when the guest stop was not confirmed; message the user; never auto-mount or
+      auto-repair on the host. — FR-023, US6.4
 - [ ] **T46** Security review checklist run on the helper before it is allowed in `install.sh` (no interpolated shell, no user-writable
       inputs read as root, paths canonicalized, argument allow-list). — Constitution III
 

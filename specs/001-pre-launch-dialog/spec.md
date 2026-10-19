@@ -98,6 +98,30 @@ asks me three things. I confirm with **Start** or abort with **Cancel**.
 7. *Given* a system disk (anything holding `/`, `/boot`, `/home`, swap, or the VM's
    own storage) exists, *then* it never appears in the list.
 
+### US6 — Disks are always released cleanly, even around a host shutdown or reboot (P1)
+
+When disks are attached to the VM and the VM closes — because I closed the window, because
+the VM was stopped, or because I shut down or reboot the computer — the disks must be handed
+back in a consistent state. Cleanup takes priority over the shutdown/reboot request, and if
+cleanup could not finish before the machine went down, the next launch repairs the leftovers
+before doing anything else.
+
+**Acceptance scenarios**
+
+1. *Given* disks are attached, *when* the VM closes for any reason, *then* Windows is first asked
+   to shut down normally (so it flushes its writes), the VM is confirmed stopped, and only then
+   are the disks released back to Linux. Disks are never released while the guest is still running.
+2. *Given* disks are attached, *when* I shut down or reboot the computer (including with Omarchy's
+   own shutdown/reboot commands), *then* the guest shutdown starts immediately and the host
+   shutdown is held for as long as the system allows while it finishes.
+3. *Given* the host shutdown could not wait long enough, *when* I next open Windows, *then* before
+   the dialog does anything else the launcher detects the leftover session, makes sure no container
+   is still holding a disk, restores what the previous session changed (automount paused for those
+   disks, bar hidden), and tells me what it did.
+4. *Given* a disk was not shut down cleanly, *then* the launcher tells me it may need a disk check
+   in Windows, and does not try to repair it silently.
+5. *Given* no disks were attached, *then* none of the above adds any delay to closing or shutdown.
+
 ### US5 — See launch and shutdown progress (P1)
 
 **Acceptance scenarios**
@@ -160,6 +184,17 @@ asks me three things. I confirm with **Start** or abort with **Cancel**.
   second session; it brings the existing progress window forward instead.
 - **FR-016** Authorization declined at any privilege prompt MUST abort cleanly with the
   reason shown.
+- **FR-020** Releasing disks MUST happen in this order, with no step skipped: request a normal
+  guest shutdown → wait until the VM is confirmed stopped → release the disks → restore automount.
+- **FR-021** While disks are attached, a host shutdown or reboot MUST NOT cut this sequence short
+  if the system can wait: the guest shutdown starts at once and the host shutdown is held for as
+  long as the system allows.
+- **FR-022** Every launch MUST begin with a reconciliation step, before the dialog's choices take
+  effect: detect leftovers of an earlier session (running container, attached or half-attached disks,
+  paused automount, hidden bar), repair them, and report what was repaired. A session that cannot be
+  reconciled MUST stop the launch with a clear message rather than attach more disks on top of it.
+- **FR-023** If a disk could not be released cleanly (guest forced off, host went down first), the
+  next launch MUST report it and MUST NOT auto-repair or auto-mount it read/write on the host.
 - **FR-017** Installing the feature MUST be reversible with one command that restores the
   stock launcher entry and removes everything else it added.
 - **FR-018** The existing `omarchy windows vm …` commands MUST keep working unchanged,
@@ -193,8 +228,10 @@ asks me three things. I confirm with **Start** or abort with **Cancel**.
   honouring option 1.
 - Dialog launched from a TTY/SSH with no shell running: falls back to the stock launcher
   behaviour with a clear message rather than failing silently.
-- The user logs out or shuts down while the VM runs with option 1 off: out of scope for
-  this feature (no change from today).
+- The user shuts down or reboots while the VM runs with **no disks** attached and option 1 off: no
+  change from today (Docker stops the container normally).
+- Power loss or a hard kill while disks are attached: cannot be prevented; handled by FR-022/FR-023
+  at the next launch.
 
 ## 6. Out of scope
 
