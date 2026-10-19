@@ -186,15 +186,15 @@ them where Windows will open, the launcher reads the workspace from the user's o
 hard-coded; `OWL_WORKSPACE` overrides), remembers the active workspace, and focuses the target workspace with
 `hl.dsp.focus({ workspace })` before summoning the dialog; on cancel it focuses the remembered workspace again. With no rule it does nothing.
 
-### D13 — Disk list popup and blur (FR-005, NFR on look)
-The user's own layer rule (`namespace ^omarchy-.*$`, `blur`, `ignore_alpha = 0.5`) blurs a surface only where it is drawn, and only where
-its alpha is above 0.5. The `MultiSelect` popup is drawn inside the same fullscreen surface as the card, so the part of it that hung below the
-card was flat (nothing blurred there) and the Cancel/Start buttons showed through. Fix: while the list is open the card grows by the list's height
-so the whole popup stays over the card (frosted like the rest), the buttons fade out, and the popup keeps the theme's default (translucent) fill.
-The space is reserved as soon as the switch is turned on, not when the list opens: the card is centered, so growing it at open time moved the
-trigger after the popup had measured its position and the first list floated too low. The list is also closed whenever the switch goes off or
-the dialog reopens, so it never loses its anchor.
-Verified in the real shell over a white window with sharp text. A `openDisks` payload flag exists only so that look can be checked from a script.
+### D13 — Disk selection is an inline list, not a popup (FR-005)
+The first design used the shell's `MultiSelect` dropdown. Inside this overlay it kept failing: its popup is drawn in the same surface as the card,
+so the compositor's blur (the user's `^omarchy-.*$` layer rule only blurs where the card is) did not cover the part hanging below the card, it covered
+Cancel/Start, and it lost its anchor when the layout moved (switch turned off with the list open, or the card growing while it opened). Patching those
+one by one (growing the card, hiding the buttons, closing the list) was fragile, so the dropdown is gone.
+Now, once "Mount external disks" is on, a **"Disks" list is shown inline**: one `Toggle` row per disk (label = model, description = size · removable/internal ·
+partitions), multi-select by clicking or Space/Enter, up to ~4 rows visible and scrollable beyond that, an "No external disks found" line when empty.
+Cancel and Start stay visible and in place, there is nothing floating, and the card simply grows when the switch is turned on. Verified in the real shell
+with 0, 2 and 7 disks. `mountDisks` in the summon payload is a test flag that starts the dialog with the switch on.
 
 ### D7 — Progress and shutdown windows (FR-011..013, US5)
 `Progress.qml` is one view with two modes (`launch`, `shutdown`), driven purely by `state.json`

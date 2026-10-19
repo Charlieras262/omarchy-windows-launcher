@@ -87,8 +87,8 @@ asks me three things. I confirm with **Start** or abort with **Cancel**.
 
 1. *Given* option 3 is **off**, *then* no disk list is visible and no extra disk is
    given to the VM.
-2. *Given* I turn option 3 **on**, *then* a multi-select field appears with the
-   eligible disks; each entry shows enough to recognise it (name/model, label if any,
+2. *Given* I turn option 3 **on**, *then* a multi-select list appears inside the dialog (not a
+   floating popup; Cancel and Start stay visible) with the eligible disks; each entry shows enough to recognise it (name/model, label if any,
    size, and its partitions). Eligible means: removable volumes such as USB sticks, and
    storage units that are not part of the Linux system (for example a secondary internal
    data disk). The unit of selection is the **whole disk**.

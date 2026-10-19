@@ -21,7 +21,6 @@ Item {
 
   property var shell: null
   property var manifest: null
-  property alias diskSelect: diskSelect
 
   property bool opened: false
   property string view: "dialog"
@@ -48,18 +47,8 @@ Item {
   property int contentMargin: Style.spacing.panelPadding
   property int cardWidth: Math.min(Style.space(380), panel.width - Style.gapsOut * 2)
 
-  // Declared after the theme-backed properties above on purpose: touching Style first changes the
-  // singleton construction order and leaves Color.menu undefined.
-  // Height the open disk list needs below its trigger: search field + up to 6 rows.
-  readonly property real diskListHeight: Style.space(56) + Math.min(Math.max(diskOptions.length, 1), 6) * Style.spacing.popupRowHeight
-
   readonly property bool terminal: vm.stage === "failed" || vm.stage === "running" || vm.stage === "stopped" || vm.stage === "cancelled"
   readonly property bool failed: vm.stage === "failed"
-
-  // The disk list is anchored to its trigger; if the trigger goes away (switch turned off, dialog
-  // reopened) while the list is open, it loses its anchor, jumps to the top of the window and keeps
-  // the card stretched. Close it whenever the switch goes off.
-  onMountDisksChanged: { if (!mountDisks) diskSelect.close() }
 
   // ---------------------------------------------------------------- entry points
 
@@ -68,7 +57,6 @@ Item {
     try { payload = JSON.parse(payloadJson || "{}") } catch (e) { payload = ({}) }
     if (payload.fontFamily) root.fontFamily = payload.fontFamily
 
-    diskSelect.close()
     root.view = payload.view === "progress" ? "progress" : "dialog"
 
     if (root.view === "dialog") {
@@ -78,11 +66,6 @@ Item {
       root.selectedDisks = []
       root.answersFile = payload.answersFile || ""
       root.diskOptions = payload.disks || []
-      // Test hook: open with the disk list expanded (used to check the popup's look).
-      if (payload.openDisks) {
-        root.mountDisks = true
-        openDisksTimer.restart()
-      }
     } else {
       root.stateFile = payload.stateFile || ""
       stateWatcher.reload()
@@ -122,15 +105,16 @@ Item {
     root.dismiss()
   }
 
+  function toggleDisk(path) {
+    var arr = root.selectedDisks.slice()
+    var i = arr.indexOf(path)
+    if (i === -1) arr.push(path)
+    else arr.splice(i, 1)
+    root.selectedDisks = arr
+  }
+
   function start() { answer("start") }
   function cancel() { answer("cancel") }
-
-  Timer {
-    id: openDisksTimer
-    interval: 400
-    repeat: false
-    onTriggered: diskSelect.open()
-  }
 
   FileView {
     id: answersOut
@@ -281,33 +265,67 @@ Item {
             onClicked: root.mountDisks = !root.mountDisks
           }
 
-          MultiSelect {
-            id: diskSelect
+          // Disks: one row per disk, always visible once the switch is on (no popup: a popup drawn
+          // inside this surface can cover the buttons and loses its anchor when the layout changes).
+          Column {
             visible: root.view === "dialog" && root.mountDisks
             width: parent.width
             height: visible ? implicitHeight : 0
-            label: "Disks"
-            // Default popup fill from the theme (translucent, above the blur layer rule's
-            // ignore_alpha). The card grows while the list is open so the popup stays over the
-            // card, where the compositor blurs, and Cancel/Start are hidden meanwhile.
-            options: root.diskOptions
-            values: root.selectedDisks
-            emptyText: "No external disks found"
-            noSelectionText: "None selected"
-            fontFamily: root.fontFamily
-            onChanged: function(values) { root.selectedDisks = values }
+            spacing: Style.spacing.labelGap
+
+            Text {
+              textFormat: Text.PlainText
+              text: "Disks"
+              color: root.foreground
+              opacity: 0.65
+              font.family: root.fontFamily
+              font.pixelSize: Style.font.caption
+            }
+
+            Flickable {
+              id: diskFlick
+              width: parent.width
+              height: Math.min(diskColumn.implicitHeight, Style.space(228))
+              contentWidth: width
+              contentHeight: diskColumn.implicitHeight
+              clip: true
+              boundsBehavior: Flickable.StopAtBounds
+
+              Column {
+                id: diskColumn
+                width: diskFlick.width
+                spacing: Style.spacing.labelGap
+
+                Repeater {
+                  model: root.diskOptions
+                  delegate: Toggle {
+                    required property var modelData
+                    width: diskColumn.width
+                    label: modelData.label
+                    description: modelData.description
+                    checked: root.selectedDisks.indexOf(modelData.value) !== -1
+                    fontFamily: root.fontFamily
+                    onClicked: root.toggleDisk(modelData.value)
+                  }
+                }
+              }
+            }
+
+            Text {
+              visible: root.diskOptions.length === 0
+              textFormat: Text.PlainText
+              text: "No external disks found"
+              color: root.foreground
+              opacity: 0.65
+              font.family: root.fontFamily
+              font.pixelSize: Style.font.body
+            }
           }
 
           Row {
-            id: buttonsRow
             visible: root.view === "dialog"
             anchors.right: parent.right
             spacing: Style.spacing.huge
-            // The disk list opens over these buttons; hide them meanwhile so they
-            // cannot show through the blurred popup.
-            opacity: diskSelect.popupOpen ? 0 : 1
-            Behavior on opacity { NumberAnimation { duration: 120 } }
-
             Button {
               text: "Cancel"
               fontFamily: root.fontFamily
@@ -323,18 +341,6 @@ Item {
               selected: true
               onClicked: root.start()
             }
-          }
-
-          // The disk list is drawn in this same surface and the compositor only blurs where the
-          // card is, so the whole popup must stay over the card. The space is reserved as soon as
-          // the switch is on (not when the list opens): the card is centered, so growing it at that
-          // moment moved the trigger after the popup had measured its position and left the first
-          // list floating too low. The list covers the (hidden) buttons row too, so only the rest
-          // of its height is added.
-          Item {
-            visible: root.view === "dialog"
-            width: parent.width
-            height: root.mountDisks ? Math.max(0, root.diskListHeight - buttonsRow.height - Style.spacing.huge) : 0
           }
 
           // ------------------------------------------------ progress view
