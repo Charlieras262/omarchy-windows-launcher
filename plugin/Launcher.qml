@@ -48,6 +48,11 @@ Item {
   property int contentMargin: Style.spacing.panelPadding
   property int cardWidth: Math.min(Style.space(380), panel.width - Style.gapsOut * 2)
 
+  // Declared after the theme-backed properties above on purpose: touching Style first changes the
+  // singleton construction order and leaves Color.menu undefined.
+  // Height the open disk list needs below its trigger: search field + up to 6 rows.
+  readonly property real diskListHeight: Style.space(56) + Math.min(Math.max(diskOptions.length, 1), 6) * Style.spacing.popupRowHeight
+
   readonly property bool terminal: vm.stage === "failed" || vm.stage === "running" || vm.stage === "stopped" || vm.stage === "cancelled"
   readonly property bool failed: vm.stage === "failed"
 
@@ -67,6 +72,11 @@ Item {
       root.selectedDisks = []
       root.answersFile = payload.answersFile || ""
       root.diskOptions = payload.disks || []
+      // Test hook: open with the disk list expanded (used to check the popup's look).
+      if (payload.openDisks) {
+        root.mountDisks = true
+        openDisksTimer.restart()
+      }
     } else {
       root.stateFile = payload.stateFile || ""
       stateWatcher.reload()
@@ -108,6 +118,13 @@ Item {
 
   function start() { answer("start") }
   function cancel() { answer("cancel") }
+
+  Timer {
+    id: openDisksTimer
+    interval: 400
+    repeat: false
+    onTriggered: diskSelect.open()
+  }
 
   FileView {
     id: answersOut
@@ -264,11 +281,9 @@ Item {
             width: parent.width
             height: visible ? implicitHeight : 0
             label: "Disks"
-            // The popup floats over the Cancel/Start buttons and the theme's popup fill is
-            // too transparent to read on. Use the card's color at 88% alpha: above the
-            // `ignore_alpha = 0.5` of the user's blur layer rule, so the compositor blurs
-            // what is behind it, and dense enough for the names to stay legible.
-            background: Qt.rgba(root.background.r, root.background.g, root.background.b, 0.88)
+            // Default popup fill from the theme (translucent, above the blur layer rule's
+            // ignore_alpha). The card grows while the list is open so the popup stays over the
+            // card, where the compositor blurs, and Cancel/Start are hidden meanwhile.
             options: root.diskOptions
             values: root.selectedDisks
             emptyText: "No external disks found"
@@ -301,6 +316,16 @@ Item {
               selected: true
               onClicked: root.start()
             }
+          }
+
+          // The disk list is drawn in this same surface and the compositor only blurs where
+          // the card is (the popup sat half outside it and looked flat). While the list is
+          // open the card grows by the list's height, so the whole popup stays over the card.
+          Item {
+            visible: root.view === "dialog"
+            width: parent.width
+            height: diskSelect.popupOpen ? root.diskListHeight : 0
+            Behavior on height { NumberAnimation { duration: 120 } }
           }
 
           // ------------------------------------------------ progress view

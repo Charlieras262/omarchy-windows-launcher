@@ -186,6 +186,13 @@ them where Windows will open, the launcher reads the workspace from the user's o
 hard-coded; `OWL_WORKSPACE` overrides), remembers the active workspace, and focuses the target workspace with
 `hl.dsp.focus({ workspace })` before summoning the dialog; on cancel it focuses the remembered workspace again. With no rule it does nothing.
 
+### D13 — Disk list popup and blur (FR-005, NFR on look)
+The user's own layer rule (`namespace ^omarchy-.*$`, `blur`, `ignore_alpha = 0.5`) blurs a surface only where it is drawn, and only where
+its alpha is above 0.5. The `MultiSelect` popup is drawn inside the same fullscreen surface as the card, so the part of it that hung below the
+card was flat (nothing blurred there) and the Cancel/Start buttons showed through. Fix: while the list is open the card grows by the list's height
+so the whole popup stays over the card (frosted like the rest), the buttons fade out, and the popup keeps the theme's default (translucent) fill.
+Verified in the real shell over a white window with sharp text. A `openDisks` payload flag exists only so that look can be checked from a script.
+
 ### D7 — Progress and shutdown windows (FR-011..013, US5)
 `Progress.qml` is one view with two modes (`launch`, `shutdown`), driven purely by `state.json`
 (`FileView`/`Process` watch inside the shell). Auto-dismiss on `running` and, after 3 s, on `stopped`.
