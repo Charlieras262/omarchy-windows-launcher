@@ -1,0 +1,70 @@
+# Tasks: Pre-launch dialog and launch/close progress
+
+Derived from `plan.md`. `[P]` = can run in parallel. Each task names the requirement it serves.
+Do not start Phase 1 until the Phase 0 spikes are recorded in `plan.md` and every
+`[NEEDS CLARIFICATION]` in `spec.md` is resolved.
+
+## Phase 0 — Spikes (answer unknowns; no production code)
+
+- [ ] **S1** Compare "own the flow" vs `--keep-alive` + `xfreerdp3` shim: confirm that the orchestrator can
+      reproduce the packaged RDP arguments and bring the VM up without calling `__priv`. Record the choice (D2). — FR-003, FR-018
+- [ ] **S2** [P] Test `xfreerdp3 /multimon /monitors:…` together with `/dynamic-resolution` and the scale rules on this
+      machine's monitors; resolve spec clarification C4. — FR-004
+- [ ] **S3** [P] With a throwaway USB stick, try attach approach A (compose override) and B (QEMU hot-plug via
+      `/run/shm/monitor.sock`); verify read/write from Windows, clean release, and udiskie behaviour. Record the choice (D5). — FR-008..010
+- [ ] **S4** [P] Inspect `http://127.0.0.1:8006` for machine-readable boot status; if none, confirm the log-line
+      fallback. Record the choice (D6). — FR-011, NFR-002
+- [ ] **S5** [P] Confirm the shell can summon a user overlay plugin with a JSON payload and read back a file result;
+      measure dialog latency. — NFR-001, FR-001
+
+## Phase 1 — Foundations
+
+- [ ] **T01** Create `plugin/manifest.json` (id `charlieras262.windows-launcher`, kind `overlay`, `keepLoaded` as the
+      spike dictates) and an empty view that loads. — FR-013
+- [ ] **T02** Define the `state.json` and `answers.json` schemas (documented in `plan.md` §4) and a bash library to
+      read/write them atomically. — FR-011
+- [ ] **T03** [P] Implement `list-disks` (lsblk-based eligibility, D4) as a standalone function with unit tests using
+      recorded `lsblk -J` fixtures: USB stick listed; NVMe root, `/boot`, `/home`, swap, VM-storage disks excluded. — FR-005..007
+- [ ] **T04** [P] Implement the session lock and the `finalize` trap skeleton (release → stop/report). — FR-014, FR-015
+- [ ] **T05** `install.sh` / `uninstall.sh` (idempotent): copy plugin and wrapper, re-point the desktop entry, install the root
+      helper with `sudo`, and restore stock on uninstall. Test round trip leaves `git status`-style identical file trees. — FR-017, FR-018
+
+## Phase 2 — Dialog (US1, US2) — MVP
+
+- [ ] **T10** `Dialog.qml`: two `Toggle`s with the specified defaults, Start/Cancel, `Esc`/`Enter`, full keyboard
+      navigation. — FR-001, FR-002
+- [ ] **T11** Orchestrator: summon dialog, wait for result, handle Cancel with zero side effects (no privilege prompt). — US1.2
+- [ ] **T12** Implement option 1 end to end: up → RDP → `down` or leave running; reconnect to a running VM. — FR-003, US2
+- [ ] **T13** Test: scripted run covering US1.1–US1.4 and US2.1–US2.3 against the real VM. — US1, US2
+
+## Phase 3 — Progress and shutdown windows (US5)
+
+- [ ] **T20** `Progress.qml` launch mode: stages, percent bar, message line, themed. — FR-011
+- [ ] **T21** Wire the booting signal chosen in S4; add the adaptive stage list (no "authorizing" with sudoless Docker). — FR-011, edge cases
+- [ ] **T22** Failure rendering: failed stage, plain reason, Close/Retry; authorization-declined path. — US5.4, FR-016
+- [ ] **T23** Shutdown mode and the "still running" toast. — FR-012, US5.5, US5.6
+- [ ] **T24** Test: simulated failures (Docker stopped, auth declined, boot timeout, RDP crash) each end in a reported, known state. — FR-014
+
+## Phase 4 — All monitors (US3)
+
+- [ ] **T30** Orchestrator: build RDP monitor flags from `hyprctl monitors -j` per S2; single-monitor path unchanged. — FR-004
+- [ ] **T31** Dialog: option 2 wired; test with 1 and N monitors. — US3
+
+## Phase 5 — External disks (US4) — highest risk, last
+
+- [ ] **T40** Dialog: option 3 reveals `MultiSelect` fed by `list-disks`, with refresh; zero selection = off. — FR-005, FR-006, US4.1–4.3
+- [ ] **T41** Root helper `omarchy-windows-launcher-priv`: closed verbs `up`, `down`, `release`; recompute eligibility as root and
+      reject anything outside it; tests for tampered `answers.json` (e.g. naming the root disk). — Constitution III, FR-007
+- [ ] **T42** Unmount flow with explicit user confirmation and "skip this disk" path; pause automount per disk. — FR-008, US4.5
+- [ ] **T43** Attach per the S3 decision; surface `preparing-disks` stage. — FR-009
+- [ ] **T44** Release on every exit path, including killed launcher and failed boot; verify disks return mountable on Linux. — FR-010, US4.6
+- [ ] **T45** Edge cases: disk unplugged during boot, VM already running with new disks (resolve C5). — spec §5
+- [ ] **T46** Security review checklist run on the helper before it is allowed in `install.sh` (no interpolated shell, no user-writable
+      inputs read as root, paths canonicalized, argument allow-list). — Constitution III
+
+## Phase 6 — Polish
+
+- [ ] **T50** README: install, uninstall, how it interacts with `omarchy windows vm`, how to revert the manual compose edits. — FR-017
+- [ ] **T51** [P] Centralize UI strings in one file. — NFR-005
+- [ ] **T52** [P] Verify no credentials appear in `state.json`, logs, notifications or the UI. — NFR-003
+- [ ] **T53** Re-run the whole acceptance checklist in `spec.md` §8; tag `v0.1.0`.

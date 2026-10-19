@@ -1,0 +1,181 @@
+# Implementation Plan: Pre-launch dialog and launch/close progress
+
+**Spec**: `spec.md` · **Constitution**: `.specify/memory/constitution.md`
+**Status**: Draft — design decisions marked **(spike)** are provisional until the
+Phase 0 spikes in `tasks.md` confirm them.
+
+## 1. What the system looks like today (verified on this machine)
+
+- Entry point: `~/.local/share/applications/windows-vm.desktop` →
+  `uwsm app -- omarchy-windows-vm launch`.
+- `/usr/bin/omarchy-windows-vm launch` brings the container up (`priv up_wait`), then runs
+  `xfreerdp3 … /dynamic-resolution …` in the foreground and, when it returns, runs `priv down`
+  unless `--keep-alive` was given. It has no hooks and no options for monitors or disks.
+- `priv` elevates with `pkexec /usr/bin/omarchy-windows-vm __priv <action>`, or runs directly
+  when the user has opted into sudoless Docker. `__priv` accepts only
+  `write_compose|up|up_wait|down|status|remove`.
+- The compose file is `/var/lib/omarchy/windows/docker-compose.yml` (root:docker, 0640) and is
+  only written by the validated `write_compose` action. It maps `/dev/kvm` and `/dev/net/tun`
+  only. Its QEMU monitor is a unix socket inside the container: `/run/shm/monitor.sock`.
+- The Omarchy shell (`omarchy-shell`, Quickshell) hosts plugins described by `manifest.json`;
+  kind `overlay` is a fullscreen/summoned window. A plugin can be summoned with
+  `omarchy-shell shell summon <plugin-id> '<json>'` and returns results through files
+  (the image-picker pattern). The shell ships `Ui/Toggle.qml`, `Ui/MultiSelect.qml`,
+  `Ui/Button.qml`, `Ui/ConfirmDialog.qml`.
+
+## 2. Constitution check
+
+| Principle | How the design complies |
+|-----------|-------------------------|
+| I No new deps | QML plugin + bash only; `xfreerdp3`, `docker`, `lsblk`, `udisksctl`, `jq` already present. |
+| II Don't modify system files | New user plugin, new user wrapper, a *separate* root-owned override compose; packaged files untouched. |
+| III Least privilege | One small root-owned helper, closed-set arguments, device list re-derived by root from `lsblk` (see §5). |
+| IV Native look | Overlay plugin built on the shell's `Ui/` components and theme singleton. |
+| V Safe by default | Disk list excludes system disks; unmount is explicit; release on every exit path. |
+| VI Fail visible | State machine with an explicit `failed` state, always rendered. |
+| VII Spec-driven | This plan traces every item to a FR in `spec.md` (§8). |
+
+## 3. Architecture
+
+```
+ desktop entry ─▶ omarchy-windows-launcher (bash, user)         ← orchestrator
+                    │  summon dialog  ──▶ shell plugin: Dialog.qml  ─▶ answers.json
+                    │  write state    ──▶ $XDG_RUNTIME_DIR/omarchy-windows-launcher/state.json
+                    │                          ▲
+                    │                          └── shell plugin: Progress.qml (reads state, renders)
+                    ├─ priv helper (root) ◀── pkexec  ─ up / attach disks / down / release
+                    └─ xfreerdp3 (user) ── waits for exit ─▶ close handling per option 1
+```
+
+Three deliverables:
+
+1. **`bin/omarchy-windows-launcher`** — bash orchestrator and single source of truth for the
+   session state machine. Installed to `~/.local/bin/`.
+2. **Shell plugin `charlieras262.windows-launcher`** (`kinds: ["overlay"]`) with two views:
+   `Dialog.qml` (options) and `Progress.qml` (launch + shutdown). It contains no business logic;
+   it renders `state.json` and writes `answers.json`.
+3. **`libexec/omarchy-windows-launcher-priv`** — root-owned helper, installed once by `install.sh`
+   into `/usr/local/libexec/`, run via `pkexec`. Needed only for the actions the packaged script
+   cannot do (disk attach/release with an override compose).
+
+`install.sh` / `uninstall.sh` copy and remove the three pieces, re-point the desktop entry, and are
+idempotent (FR-017, NFR-004). The desktop entry is user-owned, so no system file is touched.
+
+## 4. Session state machine
+
+States written to `state.json` (`{stage, percent, message, error, disks[], monitors, keepAlive}`):
+
+`idle → dialog → authorizing → preparing-disks → starting → booting → connecting → running →
+closing → stopped`, plus terminal `failed` and `cancelled`.
+
+- `percent` is derived from stage weights, not time, and never decreases.
+- The orchestrator holds a lock (`flock` on a file in the runtime dir) so a second launch only
+  re-summons the existing Progress view (FR-015).
+- Every exit path (including `trap` on signals) runs one `finalize` function: release disks, then
+  stop or report the VM per option 1 (FR-010, FR-014).
+
+## 5. Key design decisions
+
+### D1 — Options dialog (FR-001..006, US1)
+Overlay plugin view with two `Toggle`s, a conditional `MultiSelect` (shown when option 3 is on, with
+the refresh button the component already provides), **Start**/**Cancel**. It is summoned by the
+orchestrator with a JSON payload (defaults + current disk list) and answers by writing `answers.json`
+and touching a done-file — the same file round trip the image picker uses, so the orchestrator can
+block on it from bash without any IPC library.
+
+### D2 — Stop-on-close (FR-003, US2) **(spike)**
+Preferred: the orchestrator owns the whole flow and does **not** call `omarchy-windows-vm launch`
+(which always blocks on RDP and then stops). It brings the VM up through the privileged path, runs
+`xfreerdp3` itself with the same arguments as the packaged launcher, and decides on `down` itself.
+Fallback if copying the RDP argument list proves fragile across Omarchy updates: call
+`omarchy-windows-vm launch --keep-alive` and run `down` from the orchestrator when option 1 is on,
+with a `PATH` shim for `xfreerdp3` to inject extra flags. Spike S1 decides which.
+
+### D3 — All monitors (FR-004, US3)
+FreeRDP multi-monitor flags (`/multimon` with `/monitors:` built from `hyprctl monitors -j`; the
+current `/dynamic-resolution` must be compatible). Single-monitor path stays byte-for-byte what the
+packaged script does, including its scale logic. Spike S2 checks scaling with mixed-DPI monitors and
+settles clarification C4.
+
+### D4 — Eligible disks (FR-005..007, US4)
+Computed by `lsblk -J -b -o NAME,PATH,TYPE,SIZE,MODEL,LABEL,FSTYPE,TRAN,RM,HOTPLUG,MOUNTPOINTS`
+as: whole disks (`TYPE=disk`) that are removable/USB (`RM=1` or `HOTPLUG=1` or `TRAN=usb`), minus any disk
+that has a partition mounted at `/`, `/boot`, `/home`, a swap, or under the VM's storage anchors, minus the
+disk backing the VM's data. Selection unit = whole disk (C2). The root helper **recomputes** this
+same set itself and rejects anything not in it, so a tampered `answers.json` cannot name `/dev/nvme0n1`.
+
+### D5 — Attaching disks (FR-008..010) **(spike)**
+Candidates, in order of preference:
+
+- **A. Compose override**: the root helper writes `/var/lib/omarchy/windows/launcher.override.yml`
+  (root-owned, regenerated per session, deleted on release) adding `devices: [/dev/sdX]` and the
+  image's per-disk environment variables, then runs
+  `docker compose -f docker-compose.yml -f launcher.override.yml up -d`. Needs the container to be
+  recreated, so it only applies at a fresh start (edge case C5).
+- **B. QEMU hot-plug** through `/run/shm/monitor.sock` once the container runs. No recreation, but the
+  device node must exist inside the container and the block backend must be added by hand.
+
+Spike S3 tests both with a throwaway USB stick and decides. Either way: the host unmount goes through
+`udisksctl unmount` (FR-008, after the user accepts), and automounting (`udiskie` on this system) must be
+paused for the target disks during the session so it cannot remount them under the VM
+(this bit us during manual testing). Release re-enables it for those disks and lets the host re-detect them.
+
+### D6 — Progress source (FR-011, NFR-002) **(spike)**
+Stages up to "starting" come from the orchestrator itself. The "booting" stage needs a real signal without
+needing Docker access from the UI:
+- **Preferred**: the VM's own web endpoint on `127.0.0.1:8006` (the dockur status page shows install/boot
+  messages). Spike S4 checks whether it exposes machine-readable boot status.
+- **Fallback**: `docker logs` through the privileged helper, matching `Windows started successfully`
+  (what the packaged `up_wait` already does) — coarse, three-step progress.
+- **Last resort**: TCP probe of `3389` after the container reports running.
+Progress never exposes credentials (NFR-003).
+
+### D7 — Progress and shutdown windows (FR-011..013, US5)
+`Progress.qml` is one view with two modes (`launch`, `shutdown`), driven purely by `state.json`
+(`FileView`/`Process` watch inside the shell). Auto-dismiss on `running` and, after 3 s, on `stopped`.
+When option 1 is off the "still running" message is a regular `omarchy-notification-send` toast, not a window.
+
+### D8 — Privilege (FR-016, Constitution III)
+Prompt count is minimised: one `pkexec` call covers authorizing + preparing + starting. If the user has
+sudoless Docker, the helper is skipped for the VM-only path and the stage list omits "authorizing".
+The helper's entire interface is a closed verb set: `up [--disk PATH]… `, `down`, `release`, with
+argument validation modelled on the packaged `valid_*` checks. It is not a general docker wrapper.
+
+## 6. Repository layout
+
+```
+bin/omarchy-windows-launcher
+libexec/omarchy-windows-launcher-priv
+plugin/manifest.json
+plugin/Dialog.qml
+plugin/Progress.qml
+install.sh  uninstall.sh
+specs/001-pre-launch-dialog/{spec,plan,tasks}.md
+tests/                # bats-free shell tests (plain bash) for disk filtering, state machine, arg validation
+README.md  LICENSE (GPL-3.0)
+```
+
+## 7. Risks
+
+| Risk | Impact | Mitigation |
+|------|--------|-----------|
+| Packaged `omarchy-windows-vm` internals change (`__priv` actions, RDP args) | Wrapper breaks after update | Prefer own helper over undocumented `__priv`; tests that diff our RDP args against the packaged script; version check at start. |
+| Wrong disk attached (data loss) | Severe | Closed-set recompute in root helper; system-disk exclusion with tests; explicit unmount confirmation; never auto-select. |
+| Shell plugin API shifts | UI stops loading | Use only documented kinds/components; pin `schemaVersion`; degrade to stock launcher with a message. |
+| Automount (udiskie) races with attach | Disk busy / mounted twice | Pause automount per disk for the session (D5). |
+| Root helper becomes an escalation path | Severe | Root-owned install path, closed verbs, no shell-outs with interpolated input, review checklist in `tasks.md`. |
+| The manual changes made earlier (privileged container, `/dev/bus/usb` volume, `usb-host` ARGUMENTS) conflict with the override | Confusing state | Document and offer a one-step revert (backup `docker-compose.yml.bak` / `.bak2` already exist). |
+
+## 8. Traceability
+
+| Requirement | Design |
+|---|---|
+| FR-001,002 | D1 |
+| FR-003 | D2, §4 finalize |
+| FR-004 | D3 |
+| FR-005,006,007 | D1, D4 |
+| FR-008,009,010 | D5, §4 finalize |
+| FR-011,012,013 | D6, D7 |
+| FR-014,015,016 | §4, D8 |
+| FR-017,018 | §3 install/uninstall, constitution II |
+| NFR-001..005 | D1, D6, D7; strings in one file |
