@@ -81,6 +81,17 @@ ask_options() {
   return 1
 }
 
+# Re-open the options dialog for the launch that is already waiting on it (its answers file
+# is the newest empty answers.* in the runtime dir). Returns 1 if there is none.
+resummon_dialog() {
+  local answers disks
+  answers=$(find "$OWL_RUNTIME_DIR" -maxdepth 1 -name 'answers.*' -empty -printf '%T@ %p\n' 2>/dev/null | sort -rn | head -n1 | cut -d' ' -f2-)
+  [[ -n $answers ]] || return 1
+  disks=$(owl_list_disks 2>/dev/null | owl_disk_options 2>/dev/null) || disks='[]'
+  [[ -n $disks ]] || disks='[]'
+  summon "$(jq -cn --arg a "$answers" --argjson d "$disks" '{view: "dialog", answersFile: $a, disks: $d}')"
+}
+
 # ----------------------------------------------------------------- bar
 
 # NOTE the inverted wording: `omarchy-toggle-bar` drives a flag called `bar-off`, so
@@ -361,7 +372,17 @@ finalize() {
 main() {
   if ! owl_lock_acquire; then
     log "a launch is already in progress"
-    shell_available && show_progress
+    if shell_available; then
+      # Still waiting for the options dialog (it was lost or dismissed): bring it back
+      # instead of a progress window for a launch that has not started.
+      local pending
+      pending=$(owl_state_get stage)
+      if [[ $pending == idle || $pending == dialog ]]; then
+        resummon_dialog || show_progress
+      else
+        show_progress
+      fi
+    fi
     exit 0
   fi
   trap finalize EXIT

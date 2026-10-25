@@ -23,6 +23,7 @@ Item {
   property var manifest: null
 
   property bool opened: false
+  property double openedAt: 0
   property string view: "dialog"
 
   // --- dialog state
@@ -68,9 +69,12 @@ Item {
       root.diskOptions = payload.disks || []
     } else {
       root.stateFile = payload.stateFile || ""
+      root.vm = ({ stage: "idle", mode: "launch", percent: 0, message: "", error: "" })
       stateWatcher.reload()
     }
 
+    root.openedAt = Date.now()
+    watchdog.restart()
     root.opened = true
     Qt.callLater(function() { keyCatcher.forceActiveFocus() })
   }
@@ -80,6 +84,7 @@ Item {
   function dismiss() {
     root.opened = false
     dismissTimer.stop()
+    watchdog.stop()
     if (root.shell && typeof root.shell.hide === "function")
       root.shell.hide((root.manifest && root.manifest.id) || "charlieras262.windows-launcher")
   }
@@ -94,13 +99,19 @@ Item {
   function answer(action) {
     if (root.answersFile !== "") {
       var disks = (root.mountDisks ? root.selectedDisks : [])
-      answersOut.path = root.answersFile
-      answersOut.setText(JSON.stringify({
-        action: action,
-        closeOnExit: root.closeOnExit,
-        allMonitors: root.allMonitors,
-        disks: disks
-      }) + "\n")
+      // The orchestrator blocks on this file, so the write must not depend on a FileView whose
+      // path was only just assigned (that race lost the answer and left the session lock held).
+      // A short-lived shell does the write; the window closes once it is done.
+      answersOut.command = ["sh", "-c", "printf '%s\\n' \"$1\" > \"$2.tmp\" && mv -f \"$2.tmp\" \"$2\"",
+        "sh",
+        JSON.stringify({
+          action: action,
+          closeOnExit: root.closeOnExit,
+          allMonitors: root.allMonitors,
+          disks: disks
+        }),
+        root.answersFile]
+      answersOut.running = true
     }
     root.dismiss()
   }
@@ -116,9 +127,8 @@ Item {
   function start() { answer("start") }
   function cancel() { answer("cancel") }
 
-  FileView {
+  Process {
     id: answersOut
-    printErrors: false
   }
 
   // ---------------------------------------------------------------- progress
@@ -154,6 +164,26 @@ Item {
     onTriggered: root.dismiss()
   }
 
+  // The overlay takes over the screen, so it must never outlive the thing it reports on.
+  //  progress: the orchestrator rewrites the state file about once a second while it lives
+  //            (updatedAt, epoch seconds); no update for 30 s means it died, so close.
+  //  dialog:   the orchestrator gives up waiting for an answer after 5 minutes.
+  Timer {
+    id: watchdog
+    interval: 5000
+    repeat: true
+    onTriggered: {
+      if (!root.opened) { stop(); return }
+      if (root.view === "dialog") {
+        if (Date.now() - root.openedAt > 300000) root.cancel()
+        return
+      }
+      var updated = (root.vm.updatedAt || 0) * 1000
+      var last = Math.max(updated, root.openedAt)
+      if (Date.now() - last > 30000) root.dismiss()
+    }
+  }
+
   readonly property string progressTitle: root.vm.mode === "shutdown" ? "Shutting down Windows" : "Starting Windows"
 
   // ---------------------------------------------------------------- window
@@ -165,18 +195,23 @@ Item {
     color: "transparent"
     WlrLayershell.namespace: "omarchy-windows-launcher"
     WlrLayershell.layer: WlrLayer.Overlay
-    WlrLayershell.keyboardFocus: WlrKeyboardFocus.Exclusive
+    // The dialog is modal; the progress window only reports, so it neither grabs the keyboard
+    // nor swallows clicks outside its card.
+    WlrLayershell.keyboardFocus: root.view === "dialog" ? WlrKeyboardFocus.Exclusive : WlrKeyboardFocus.None
     exclusionMode: ExclusionMode.Ignore
+    mask: Region { item: root.view === "dialog" ? null : card }
 
     Rectangle {
       anchors.fill: parent
+      visible: root.view === "dialog"
       color: root.scrim
     }
 
-    // Clicking outside cancels the dialog; the progress window is not dismissed by accident.
+    // Clicking outside cancels the dialog.
     MouseArea {
       anchors.fill: parent
-      onClicked: { if (root.view === "dialog") root.cancel(); else if (root.terminal) root.dismiss() }
+      enabled: root.view === "dialog"
+      onClicked: root.cancel()
     }
 
     BorderSurface {
@@ -200,7 +235,7 @@ Item {
         Keys.onPressed: function(event) {
           if (event.key === Qt.Key_Escape) {
             if (root.view === "dialog") root.cancel()
-            else if (root.terminal) root.dismiss()
+            else root.dismiss()
             event.accepted = true
           } else if (event.key === Qt.Key_Return || event.key === Qt.Key_Enter) {
             if (root.view === "dialog") root.start()
@@ -383,11 +418,11 @@ Item {
             wrapMode: Text.WordWrap
           }
 
-          // Only a failure keeps the window open, so only then is there anything to close.
+          // Always closable: hiding the window never stops the launch itself.
           Button {
-            visible: root.view === "progress" && root.failed
+            visible: root.view === "progress"
             anchors.right: parent.right
-            text: "Close"
+            text: root.terminal ? "Close" : "Hide"
             fontFamily: root.fontFamily
             bordered: true
             focusable: true
